@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { HostPriority } from "./host-priority";
 import { NOTIFY_EVENTS } from "@/lib/notify-events";
 import type { AppSettings } from "@/lib/settings";
 import { checkFlareSolverr, saveAppSettings, sendTestNotification, type SettingsState, type TestState } from "./actions";
@@ -43,6 +44,7 @@ export function SettingsForm({ settings }: { settings: AppSettings }) {
             <input name="minFreeGb" type="number" min={0} step="1" className="input" defaultValue={settings.minFreeGb} />
           </Field>
         </div>
+        <HostPriority key={settings.hostPriority.join(",")} initial={settings.hostPriority} />
       </fieldset>
 
       <fieldset className="space-y-2">

@@ -30,7 +30,17 @@ const STATUS_STYLES: Record<LinkStatus, string> = {
   failed: "text-red-500",
   offline: "text-amber-500",
   ignored: "text-muted line-through",
+  mirror: "text-muted",
 };
+
+const STATUS_TITLES: Partial<Record<LinkStatus, string>> = {
+  mirror: "Downloaded from another host",
+};
+
+/** Queued with nothing left to fetch itself: every remaining file waits on a preferred host. */
+function isStandby(l: LinkWithProgress): boolean {
+  return l.status === "queued" && l.files_standby > 0 && l.files_standby + l.files_done === l.file_count;
+}
 
 const RETRYABLE: LinkStatus[] = ["failed", "offline", "ignored", "queued"];
 const IGNORABLE: LinkStatus[] = ["new", "queued", "resolving", "downloading", "failed", "offline"];
@@ -79,7 +89,15 @@ export function LinksTable({
                   </td>
                 )}
                 <td className="px-4 py-2">
-                  <span className={STATUS_STYLES[l.status]}>{l.status}</span>
+                  {isStandby(l) ? (
+                    <span className="text-muted" title="Waiting: a preferred host has this file">
+                      standby
+                    </span>
+                  ) : (
+                    <span className={STATUS_STYLES[l.status]} title={STATUS_TITLES[l.status]}>
+                      {l.status}
+                    </span>
+                  )}
                   {l.status === "queued" && l.retry_at && l.retry_at > now && (
                     <div className="text-xs text-muted">retry {formatAgo(l.retry_at, now)}</div>
                   )}
@@ -93,6 +111,7 @@ export function LinksTable({
                       <div className="mt-1 text-xs tabular-nums text-muted">
                         {formatBytes(l.bytes_done)} / {formatBytes(l.bytes_total)}
                         {l.file_count > 1 && ` · ${l.files_done}/${l.file_count} files`}
+                        {l.files_standby > 0 && ` · ${l.files_standby} on standby`}
                         {l.status === "downloading" && l.speed_bps > 0 && (
                           <>
                             {` · ${formatBytes(l.speed_bps)}/s`}

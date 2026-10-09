@@ -1,8 +1,19 @@
 import { all, getDb, one, run } from "./db";
 import { hostIdFor, normalizeLinkUrl } from "./hosts";
 
-export type LinkStatus = "new" | "queued" | "resolving" | "downloading" | "done" | "failed" | "ignored" | "offline";
-export type FileStatus = "queued" | "downloading" | "done" | "failed" | "skipped";
+export type LinkStatus =
+  | "new"
+  | "queued"
+  | "resolving"
+  | "downloading"
+  | "done"
+  | "failed"
+  | "ignored"
+  | "offline"
+  /** Every file of this link came from a more preferred host instead. */
+  | "mirror";
+/** `standby`: an identical file on a more preferred host is (or was) being used instead. */
+export type FileStatus = "queued" | "downloading" | "done" | "failed" | "skipped" | "standby";
 
 export type Link = {
   id: number;
@@ -17,6 +28,8 @@ export type Link = {
   discovered_at: number;
   updated_at: number | null;
   archive_password: string | null;
+  /** When the link's files became known; null until first resolved. */
+  resolved_at: number | null;
 };
 
 export type LinkWithProgress = Link & {
@@ -25,6 +38,8 @@ export type LinkWithProgress = Link & {
   speed_bps: number;
   file_count: number;
   files_done: number;
+  /** Files held back because another host is preferred for them. */
+  files_standby: number;
   bytes_done: number;
   bytes_total: number | null;
 };
@@ -77,6 +92,7 @@ const WITH_PROGRESS = `
   SELECT l.*, c.name AS container_name,
          COUNT(f.id) AS file_count,
          COALESCE(SUM(f.status IN ('done', 'skipped')), 0) AS files_done,
+         COALESCE(SUM(f.status = 'standby'), 0) AS files_standby,
          COALESCE(SUM(f.bytes_done), 0) AS bytes_done,
          COALESCE(SUM(CASE WHEN f.status = 'downloading' THEN f.speed_bps ELSE 0 END), 0) AS speed_bps,
          CASE WHEN COUNT(f.id) = 0 OR COUNT(f.size) < COUNT(f.id) THEN NULL ELSE SUM(f.size) END AS bytes_total
@@ -104,7 +120,7 @@ export function activeLinks(): LinkWithProgress[] {
 export function recentlyFinishedLinks(limit = 50): LinkWithProgress[] {
   return all<LinkWithProgress>(
     `${WITH_PROGRESS}
-      WHERE l.status IN ('done', 'failed', 'offline')
+      WHERE l.status IN ('done', 'failed', 'offline', 'mirror')
       GROUP BY l.id
       ORDER BY l.updated_at DESC LIMIT ?`,
     limit,
@@ -134,14 +150,104 @@ export function pendingLinkCount(containerId: number): number {
   );
 }
 
-/** Links ready to process: new, or queued with no pending retry delay, in enabled containers. */
-export function claimableLinks(now = Date.now(), limit = 100): Link[] {
+const READY = `c.enabled = 1 AND l.status IN ('new', 'queued') AND (l.retry_at IS NULL OR l.retry_at <= ?)`;
+
+/** Links whose files aren't known yet and are ready to be resolved. */
+export function unresolvedLinks(now = Date.now(), limit = 100): Link[] {
   return all<Link>(
     `SELECT l.* FROM links l JOIN containers c ON c.id = l.container_id
-      WHERE c.enabled = 1 AND l.status IN ('new', 'queued') AND (l.retry_at IS NULL OR l.retry_at <= ?)
+      WHERE ${READY} AND l.resolved_at IS NULL
       ORDER BY l.discovered_at, l.id LIMIT ?`,
     now,
     limit,
+  );
+}
+
+/** Resolved links with at least one file chosen for download. */
+export function downloadableLinks(now = Date.now(), limit = 100): Link[] {
+  return all<Link>(
+    `SELECT l.* FROM links l JOIN containers c ON c.id = l.container_id
+      WHERE ${READY} AND l.resolved_at IS NOT NULL
+        AND EXISTS (SELECT 1 FROM files f WHERE f.link_id = l.id AND f.status = 'queued')
+      ORDER BY l.discovered_at, l.id LIMIT ?`,
+    now,
+    limit,
+  );
+}
+
+export function markResolved(id: number) {
+  run("UPDATE links SET resolved_at = ?, status = 'queued', error = NULL, attempts = 0, retry_at = NULL, updated_at = ? WHERE id = ?", Date.now(), Date.now(), id);
+}
+
+/** Containers with links still in play, i.e. where mirror selection may have work. */
+export function containersWithActiveLinks(): number[] {
+  return all<{ id: number }>(
+    "SELECT DISTINCT container_id AS id FROM links WHERE status IN ('new', 'queued', 'resolving', 'downloading')",
+  ).map((r) => r.id);
+}
+
+/** True while freshly found links of the container are still being resolved; selection waits for them. */
+export function resolvingInProgress(containerId: number): boolean {
+  return (
+    (one<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM links WHERE container_id = ? AND resolved_at IS NULL AND status IN ('new', 'resolving')",
+      containerId,
+    )?.n ?? 0) > 0
+  );
+}
+
+export type ContainerFile = {
+  fileId: number;
+  linkId: number;
+  host: string;
+  name: string;
+  dir: string;
+  size: number | null;
+  fileStatus: FileStatus;
+  linkStatus: LinkStatus;
+  linkDiscoveredAt: number;
+  linkRetryAt: number | null;
+  linkResolvedAt: number | null;
+};
+
+/** Every file of a container with its link's state, for mirror selection and settling. */
+export function containerFiles(containerId: number): ContainerFile[] {
+  return all<ContainerFile>(
+    `SELECT f.id AS fileId, l.id AS linkId, l.host, f.remote_name AS name, f.dir, f.size,
+            f.status AS fileStatus, l.status AS linkStatus, l.discovered_at AS linkDiscoveredAt,
+            l.retry_at AS linkRetryAt, l.resolved_at AS linkResolvedAt
+       FROM files f JOIN links l ON l.id = f.link_id
+      WHERE l.container_id = ?`,
+    containerId,
+  );
+}
+
+export function setFileStatuses(ids: number[], status: FileStatus) {
+  if (ids.length === 0) return;
+  run(
+    `UPDATE files SET status = ?, updated_at = ? WHERE id IN (${ids.map(() => "?").join(",")})`,
+    status,
+    Date.now(),
+    ...ids,
+  );
+}
+
+/** A permanently failed/offline link gives up its files so other hosts' copies can be used. */
+export function failLinkFiles(linkId: number, error: string) {
+  run(
+    "UPDATE files SET status = 'failed', error = ?, speed_bps = 0, updated_at = ? WHERE link_id = ? AND status IN ('queued', 'standby', 'downloading')",
+    error,
+    Date.now(),
+    linkId,
+  );
+}
+
+/** A link that will be retried later parks its unfinished files so another host may step in meanwhile. */
+export function parkLinkFiles(linkId: number) {
+  run(
+    "UPDATE files SET status = 'standby', speed_bps = 0, updated_at = ? WHERE link_id = ? AND status IN ('queued', 'downloading', 'failed')",
+    Date.now(),
+    linkId,
   );
 }
 
@@ -165,14 +271,14 @@ export function setLinkStatus(
   );
 }
 
-/** User-initiated retry: clears attempts and backoff. */
+/** User-initiated retry: clears attempts and backoff; mirror selection then re-decides its files. */
 export function requeueLink(id: number) {
   run(
     "UPDATE links SET status = 'queued', error = NULL, attempts = 0, retry_at = NULL, updated_at = ? WHERE id = ?",
     Date.now(),
     id,
   );
-  run("UPDATE files SET status = 'queued', error = NULL WHERE link_id = ? AND status = 'failed'", id);
+  run("UPDATE files SET status = 'standby', error = NULL WHERE link_id = ? AND status = 'failed'", id);
 }
 
 /** Puts work interrupted by a crash or shutdown back in the queue. */
@@ -187,9 +293,10 @@ export function upsertFiles(
   files: { key: string; name: string; dir: string; size: number | null; hash: string | null }[],
 ): FileRow[] {
   const db = getDb();
+  // New files start on standby; mirror selection decides which copy downloads.
   const upsert = db.prepare(
-    `INSERT INTO files (link_id, key, remote_name, dir, size, hash, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO files (link_id, key, remote_name, dir, size, hash, updated_at, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'standby')
      ON CONFLICT (link_id, key) DO UPDATE
         SET remote_name = excluded.remote_name, dir = excluded.dir,
             size = excluded.size, hash = excluded.hash`,

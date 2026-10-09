@@ -46,8 +46,38 @@ function cnl2Page(links: string[]) {
     </form></body></html>`;
 }
 
+// Mirror tests: two fake hosts serving the same files under /a/ and /b/.
+const mirrorCrates: Record<string, string[]> = {};
+const rawHits: string[] = [];
+/** Per `${host}:${name}` HTTP status override for downloads: 404 (gone) or 429 (rate limited). */
+const rawStatus = new Map<string, number>();
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url!, base);
+  const mirrorCrate = /^\/mcrate\/(\w+)$/.exec(url.pathname)?.[1];
+  if (mirrorCrate) {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(cnl2Page(mirrorCrates[mirrorCrate].map((p) => `${base}${p}`)));
+    return;
+  }
+  const mirrorRaw = /^\/raw([ab])\/(.+)$/.exec(url.pathname);
+  if (mirrorRaw) {
+    const [, host, name] = mirrorRaw;
+    rawHits.push(`${host}:${name}`);
+    const forced = rawStatus.get(`${host}:${name}`);
+    if (forced) {
+      res.writeHead(forced, forced === 429 ? { "retry-after": "3600" } : {}).end();
+      return;
+    }
+    const body = files[name];
+    if (!body) {
+      res.writeHead(404).end();
+      return;
+    }
+    res.writeHead(200, { "content-length": body.length });
+    res.end(body);
+    return;
+  }
   if (url.pathname === "/crate2") {
     res.writeHead(200, { "content-type": "text/html" });
     res.end(cnl2Page([`${base}/u/show.zip`]));
@@ -98,6 +128,19 @@ beforeAll(async () => {
       ];
     },
   });
+});
+
+beforeAll(() => {
+  for (const host of ["a", "b"]) {
+    RESOLVERS.push({
+      id: `host${host}`,
+      matches: (u) => u.origin === base && u.pathname.startsWith(`/${host}/`),
+      async resolve(u) {
+        const name = u.pathname.slice(3);
+        return [{ key: name, name, dir: "", size: files[name]?.length ?? null, hash: null, open: httpOpener(`${base}/raw${host}/${name}`) }];
+      },
+    });
+  }
 });
 
 afterAll(() => {
@@ -208,5 +251,64 @@ describe.skipIf(!sevenZip)("pipeline + extraction", () => {
     const out = path.join(tmp, "downloads", "tv", "Zipped");
     expect(fs.readdirSync(out).sort()).toEqual(["Episode 01.mkv", "show.zip"]);
     expect(fs.readFileSync(path.join(out, "Episode 01.mkv")).equals(fs.readFileSync(path.join(work, "Episode 01.mkv")))).toBe(true);
+  });
+});
+
+describe("pipeline + preferred hosts", () => {
+  const signal = new AbortController().signal;
+  let n = 0;
+
+  async function mirrorContainer(links: string[]) {
+    const key = `m${++n}`;
+    mirrorCrates[key] = links;
+    const id = createContainer(
+      containerInput.parse({
+        name: `Mirrors ${key}`,
+        url: `${base}/mcrate/${key}`,
+        password: "",
+        poll_interval_min: "30",
+        target_dir: "mirrors",
+        path_template: "{container}/{filename}",
+        enabled: "on",
+        poll: "on",
+      }),
+    );
+    await checkContainer(getContainer(id)!, signal);
+    return id;
+  }
+  const statuses = (id: number) => Object.fromEntries(listLinks(id).map((l) => [l.host, l.status]));
+  const hitsFor = (name: string) => rawHits.filter((h) => h.endsWith(`:${name}`));
+  const saved = (name: string) => fs.readFileSync(path.join(tmp, "downloads", "mirrors", `Mirrors m${n}`, name));
+
+  beforeAll(async () => {
+    (await import("@/lib/settings")).saveSettings({ hostPriority: ["hostb", "hosta"] });
+    for (const name of ["m1.bin", "m2.bin", "m3.bin"]) files[name] = crypto.randomBytes(20_000);
+  });
+
+  it("downloads each file once, from the preferred host, and marks the other link as a mirror", async () => {
+    const id = await mirrorContainer(["/a/m1.bin", "/b/m1.bin"]); // less preferred host listed first
+    await drain(id);
+    expect(statuses(id)).toEqual({ hosta: "mirror", hostb: "done" });
+    expect(hitsFor("m1.bin")).toEqual(["b:m1.bin"]);
+    expect(saved("m1.bin").equals(files["m1.bin"])).toBe(true);
+  });
+
+  it("falls back to the next host when the preferred copy is gone", async () => {
+    rawStatus.set("b:m2.bin", 404);
+    const id = await mirrorContainer(["/b/m2.bin", "/a/m2.bin"]);
+    await drain(id);
+    expect(statuses(id)).toEqual({ hosta: "done", hostb: "offline" });
+    expect(hitsFor("m2.bin")).toEqual(["b:m2.bin", "a:m2.bin"]);
+    expect(saved("m2.bin").equals(files["m2.bin"])).toBe(true);
+  });
+
+  it("uses another host instead of waiting out a rate limit", async () => {
+    rawStatus.set("b:m3.bin", 429);
+    const id = await mirrorContainer(["/b/m3.bin", "/a/m3.bin"]);
+    await drain(id);
+    // hostb's link would retry in an hour; its file was covered by hosta meanwhile.
+    expect(statuses(id)).toEqual({ hosta: "done", hostb: "mirror" });
+    expect(hitsFor("m3.bin")).toEqual(["b:m3.bin", "a:m3.bin"]);
+    expect(saved("m3.bin").equals(files["m3.bin"])).toBe(true);
   });
 });

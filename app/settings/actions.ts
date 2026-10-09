@@ -16,6 +16,7 @@ import { ACCOUNT_FIELDS, listHostAccounts, saveHostAccount } from "@/lib/host-ac
 import { normalizeTargetDir } from "@/lib/paths";
 import { testFlareSolverr } from "@/lib/crawlers";
 import { notify } from "@/lib/notify";
+import { KNOWN_HOSTS } from "@/lib/host-ids";
 import { getSettings, NOTIFY_EVENTS, saveSettings, type NotifyEvent } from "@/lib/settings";
 
 export type SettingsState = { errors?: Record<string, string[] | undefined>; saved?: boolean };
@@ -57,7 +58,10 @@ export async function saveAppSettings(_prev: SettingsState, formData: FormData):
   if (!parsed.success) return { errors: z.flattenError(parsed.error).fieldErrors };
   const { mbPerSecond, ...rest } = parsed.data;
   const notifyEvents = formData.getAll("notifyEvents").filter((e): e is NotifyEvent => String(e) in NOTIFY_EVENTS);
-  saveSettings({ ...rest, notifyEvents, bytesPerSecond: Math.round(mbPerSecond * 1024 * 1024) });
+  const known: string[] = KNOWN_HOSTS.map((h) => h.id);
+  const picked = [...new Set(formData.getAll("hostPriority").map(String))].filter((id) => known.includes(id));
+  const hostPriority = [...picked, ...known.filter((id) => !picked.includes(id))];
+  saveSettings({ ...rest, notifyEvents, hostPriority, bytesPerSecond: Math.round(mbPerSecond * 1024 * 1024) });
   refresh();
   return { saved: true };
 }

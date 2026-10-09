@@ -5,7 +5,7 @@ import { connection } from "next/server";
 import { getContainer } from "@/lib/containers";
 import { recentEvents } from "@/lib/events";
 import { listExtractions, listLinks } from "@/lib/links";
-import { AddLinksForm } from "../add-links-form";
+import { AddLinksForm, ImportDlcForm } from "../add-links-form";
 import { AutoRefresh } from "../../auto-refresh";
 import { LinksTable } from "../../links-table";
 import { EventList, formatAgo, StatusBadge } from "../../ui";
@@ -86,8 +86,9 @@ async function ContainerDetail({ params }: { params: Promise<{ id: string }> }) 
       </section>
 
       <details className="card">
-        <summary className="cursor-pointer px-4 py-2 font-medium">Add links by hand</summary>
+        <summary className="cursor-pointer px-4 py-2 font-medium">Add links by hand or import a .dlc</summary>
         <AddLinksForm containerId={container.id} />
+        <ImportDlcForm containerId={container.id} />
       </details>
 
       {archives.length > 0 && (

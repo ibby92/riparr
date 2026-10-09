@@ -1,5 +1,6 @@
 import { NeedsAttentionError } from "@/lib/errors";
 import { cnl2Source, findCnl2Payloads } from "./cnl2";
+import { decryptDlc, dlcLinks } from "./dlc";
 import {
   cookiePairsFor,
   flaresolverrGet,
@@ -14,6 +15,7 @@ import type { ContainerSource, CrawlOptions, CrawlResult } from "./types";
 
 export type { ContainerSource, CrawlOptions, CrawlResult } from "./types";
 export { decryptCnl2 } from "./cnl2";
+export { decryptDlc, dlcLinks, DlcError, type DlcPackage } from "./dlc";
 export { isKnownHostUrl, KNOWN_HOST_DOMAINS } from "./known-hosts";
 export { normalizeFlareSolverrEndpoint, testFlareSolverr } from "./flaresolverr";
 export type { FlareSolverrTestResult } from "./flaresolverr";
@@ -40,7 +42,23 @@ const CHALLENGE_MSG =
   "Blocked by an anti-bot challenge (Cloudflare/DDoS-Guard) — configure FlareSolverr in Settings, or open the container in a browser";
 const FS_CHALLENGE_MSG =
   "Still blocked by an anti-bot challenge after going through FlareSolverr — open the container in a browser";
-const DLC_LINK = /href\s*=\s*["']?[^"'\s>]*\.dlc\b|DownloadDLC\(/i;
+const DLC_HREF = /href\s*=\s*["']?([^"'\s>]*\.dlc(?:[?#][^"'\s>]*)?)(?=["'\s>])/gi;
+// filecrypt-style buttons: DownloadDLC('<id>') -> /DLC/<id>.dlc
+const DLC_JS = /DownloadDLC\(\s*["']([\w-]+)["']\s*\)/gi;
+
+/** Absolute URLs of `.dlc` files offered by the page. */
+export function findDlcUrls(html: string, baseUrl: string): string[] {
+  const urls = new Set<string>();
+  const add = (href: string) => {
+    try {
+      const u = new URL(href.replace(/&amp;/g, "&"), baseUrl);
+      if (u.protocol === "http:" || u.protocol === "https:") urls.add(u.href);
+    } catch {}
+  };
+  for (const m of html.matchAll(DLC_HREF)) add(m[1]);
+  for (const m of html.matchAll(DLC_JS)) add(`/DLC/${m[1]}.dlc`);
+  return [...urls];
+}
 
 /** Human-readable reason the page needs a person, or null. */
 export function detectAttention(html: string, password: string | null): string | null {
@@ -203,12 +221,33 @@ async function submitPassword(page: Page, password: string, opts: CrawlOptions, 
   });
 }
 
-async function runSources(url: string, html: string, opts: CrawlOptions): Promise<CrawlResult | null> {
-  for (const source of sources) {
-    const result = await source.crawl(url, html, opts);
-    if (result?.links.length) return result;
+/** Downloads the page's DLC file(s) with the page's cookies and decrypts them. */
+async function crawlDlc(page: Page, opts: CrawlOptions): Promise<{ result: CrawlResult | null; error: string | null }> {
+  let error: string | null = null;
+  for (const url of findDlcUrls(page.html, page.url)) {
+    try {
+      const file = await fetchPage(url, opts, { headers: { Referer: page.url } }, { cookies: page.cookies, userAgent: page.userAgent });
+      const links = dlcLinks(await decryptDlc(file.html, { signal: opts.signal, fetch: opts.fetch }));
+      if (links.length) return { result: { links, source: "dlc" }, error: null };
+    } catch (err) {
+      if (opts.signal.aborted) throw err;
+      error = err instanceof Error ? err.message : String(err);
+    }
   }
-  return null;
+  return { result: null, error };
+}
+
+/** Click'n'Load first, then DLC, then any plain host links on the page. */
+async function runSources(page: Page, opts: CrawlOptions): Promise<{ result: CrawlResult | null; dlcError: string | null }> {
+  const cnl = await cnl2Source.crawl(page.url, page.html, opts);
+  if (cnl?.links.length) return { result: cnl, dlcError: null };
+  const dlc = await crawlDlc(page, opts);
+  if (dlc.result) return { result: dlc.result, dlcError: null };
+  for (const source of sources.filter((s) => s !== cnl2Source)) {
+    const result = await source.crawl(page.url, page.html, opts);
+    if (result?.links.length) return { result, dlcError: null };
+  }
+  return { result: null, dlcError: dlc.error };
 }
 
 /** Password form, sources and attention checks on an already-fetched page. */
@@ -223,7 +262,7 @@ async function crawlPage(page: Page, opts: CrawlOptions, endpoint: string | null
     }
   }
 
-  const result = await runSources(page.url, page.html, opts);
+  const { result, dlcError } = await runSources(page, opts);
   if (result) return result;
 
   const attention = detectAttention(page.html, opts.password);
@@ -232,8 +271,9 @@ async function crawlPage(page: Page, opts: CrawlOptions, endpoint: string | null
     throw new NeedsAttentionError(attention);
   }
   if (findCnl2Payloads(page.html).length) throw new Error("Found Click'n'Load data but couldn't decrypt it");
-  if (DLC_LINK.test(page.html)) {
-    throw new NeedsAttentionError("Container only offers a DLC file, which isn't supported — use Click'n'Load in a browser");
+  if (dlcError) {
+    const hint = dlcError.includes("unreachable") ? "" : " — try Click'n'Load in a browser";
+    throw new NeedsAttentionError(`DLC: ${dlcError}${hint}`);
   }
   return { links: [], source: "none" };
 }

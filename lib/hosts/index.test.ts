@@ -39,3 +39,11 @@ describe("normalizeLinkUrl", () => {
     expect(normalizeLinkUrl("  not a url ")).toBe("not a url");
   });
 });
+
+describe("KNOWN_HOSTS", () => {
+  it("matches the resolver registry", async () => {
+    const { KNOWN_HOSTS } = await import("@/lib/host-ids");
+    const { RESOLVERS } = await import("./index");
+    expect(KNOWN_HOSTS.map((h) => h.id).sort()).toEqual(RESOLVERS.map((r) => r.id).sort());
+  });
+});

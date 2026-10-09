@@ -35,6 +35,8 @@ export type AppSettings = {
   perHost: number;
   /** Per-download speed cap in bytes/second; 0 = unlimited. */
   bytesPerSecond: number;
+  /** Host ids in order of preference for identical files on several hosts; unlisted hosts come last. */
+  hostPriority: string[];
   /** New downloads wait while the downloads volume has less free space than this (GB); 0 = off. */
   minFreeGb: number;
   cnlEnabled: boolean;
@@ -60,6 +62,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   perHost: 2,
   bytesPerSecond: 0,
   minFreeGb: 5,
+  hostPriority: ["gofile", "pixeldrain", "mega"],
   cnlEnabled: true,
   cnlTargetDir: "clicknload",
   cnlTemplate: "{container}/{dir}/{filename}",
@@ -76,6 +79,7 @@ const SETTING_KEYS: Record<keyof AppSettings, string> = {
   perHost: "downloads.per_host",
   bytesPerSecond: "downloads.bytes_per_second",
   minFreeGb: "downloads.min_free_gb",
+  hostPriority: "downloads.host_priority",
   cnlEnabled: "cnl.enabled",
   cnlTargetDir: "cnl.target_dir",
   cnlTemplate: "cnl.template",

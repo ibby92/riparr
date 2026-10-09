@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 // Append-only: each entry is applied once, tracked via PRAGMA user_version.
 // Timestamps are Unix epoch milliseconds.
-const MIGRATIONS: string[] = [
+export const MIGRATIONS: string[] = [
   `
   CREATE TABLE containers (
     id                INTEGER PRIMARY KEY,
@@ -116,9 +116,67 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE files ADD COLUMN speed_bps INTEGER NOT NULL DEFAULT 0;
   `,
+  // Mirrors: links resolve before downloading so the preferred host can be chosen.
+  // Rebuilds links/files to extend their status CHECKs (SQLite can't alter them).
+  `
+  CREATE TABLE links_new (
+    id               INTEGER PRIMARY KEY,
+    container_id     INTEGER NOT NULL REFERENCES containers(id) ON DELETE CASCADE,
+    url              TEXT    NOT NULL,
+    fingerprint      TEXT    NOT NULL,
+    host             TEXT    NOT NULL,
+    status           TEXT    NOT NULL DEFAULT 'new'
+                     CHECK (status IN ('new', 'queued', 'resolving', 'downloading', 'done', 'failed', 'ignored', 'offline', 'mirror')),
+    error            TEXT,
+    discovered_at    INTEGER NOT NULL,
+    attempts         INTEGER NOT NULL DEFAULT 0,
+    retry_at         INTEGER,
+    updated_at       INTEGER,
+    archive_password TEXT,
+    -- Set once the link's files are known (files rows exist).
+    resolved_at      INTEGER,
+    UNIQUE (container_id, fingerprint)
+  );
+  INSERT INTO links_new
+    SELECT l.id, l.container_id, l.url, l.fingerprint, l.host, l.status, l.error, l.discovered_at, l.attempts,
+           l.retry_at, l.updated_at, l.archive_password,
+           CASE WHEN EXISTS (SELECT 1 FROM files f WHERE f.link_id = l.id) THEN COALESCE(l.updated_at, l.discovered_at) END
+      FROM links l;
+  DROP TABLE links;
+  ALTER TABLE links_new RENAME TO links;
+  CREATE INDEX links_status ON links(status);
+
+  CREATE TABLE files_new (
+    id          INTEGER PRIMARY KEY,
+    link_id     INTEGER NOT NULL REFERENCES links(id) ON DELETE CASCADE,
+    remote_name TEXT    NOT NULL,
+    size        INTEGER,
+    hash        TEXT,
+    local_path  TEXT,
+    bytes_done  INTEGER NOT NULL DEFAULT 0,
+    -- standby: an identical file on a more preferred host is (or was) used instead.
+    status      TEXT    NOT NULL DEFAULT 'queued'
+                CHECK (status IN ('queued', 'downloading', 'done', 'failed', 'skipped', 'standby')),
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    error       TEXT,
+    updated_at  INTEGER NOT NULL,
+    key         TEXT    NOT NULL DEFAULT '',
+    dir         TEXT    NOT NULL DEFAULT '',
+    speed_bps   INTEGER NOT NULL DEFAULT 0
+  );
+  INSERT INTO files_new
+    SELECT id, link_id, remote_name, size, hash, local_path, bytes_done, status, attempts, error, updated_at, key, dir, speed_bps
+      FROM files;
+  DROP TABLE files;
+  ALTER TABLE files_new RENAME TO files;
+  CREATE INDEX files_status ON files(status);
+  CREATE UNIQUE INDEX files_link_key ON files(link_id, key);
+  `,
 ];
 
 export function migrate(db: DatabaseSync) {
+  // Table rebuilds need foreign keys off, and that pragma is ignored inside a transaction.
+  db.exec("PRAGMA foreign_keys = OFF");
   // IMMEDIATE takes the write lock up front so the web server and the worker
   // can't both apply the same migration when they start together.
   db.exec("BEGIN IMMEDIATE");
@@ -127,10 +185,14 @@ export function migrate(db: DatabaseSync) {
     for (let v = user_version; v < MIGRATIONS.length; v++) {
       db.exec(MIGRATIONS[v]);
     }
+    const broken = db.prepare("PRAGMA foreign_key_check").all();
+    if (broken.length) throw new Error(`Migration left ${broken.length} dangling foreign key(s)`);
     db.exec(`PRAGMA user_version = ${MIGRATIONS.length}`);
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
     throw err;
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
   }
 }

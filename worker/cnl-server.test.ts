@@ -137,3 +137,27 @@ describe("settings and accounts", () => {
     expect(hostAccount("pixeldrain")).toBeNull();
   });
 });
+
+describe("Click'n'Load v1 (DLC)", () => {
+  it("decrypts a DLC posted to /flash/addcrypted", async () => {
+    const { makeDlc } = await import("@/lib/crawlers/dlc-fixture");
+    const dlc = makeDlc([{ name: "pkg", links: ["https://gofile.io/d/dlc1", "https://pixeldrain.com/u/dlc2"] }]);
+    const realFetch = globalThis.fetch;
+    // Only JDownloader's service is faked; requests to the listener go through.
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+      new URL(String(input)).hostname === "service.jdownloader.org"
+        ? new Response(`<rc>${dlc.rc}</rc>`)
+        : realFetch(input, init)) as typeof fetch;
+    try {
+      const res = await post("/flash/addcrypted", { crypted: dlc.file, source: "https://dlc.example/c/7" });
+      expect(await res.text()).toBe("success\r\n");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    const container = listContainers().find((c) => c.url === "https://dlc.example/c/7")!;
+    expect(listLinks(container.id).map((l) => l.url).sort()).toEqual([
+      "https://gofile.io/d/dlc1",
+      "https://pixeldrain.com/u/dlc2",
+    ]);
+  });
+});

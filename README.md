@@ -2,8 +2,9 @@
 
 Hands-off downloads for your *arr stack. Point Riparr at a **container** (a link-protector or paste page that lists file-host links) and it keeps watching it: when new links appear, Riparr downloads them from the host, verifies them, extracts archives and files everything under the folder and naming scheme you chose.
 
-- **Containers:** Click'n'Load (CNL2) pages, plain paste pages (rentry, pastebin, …), and links pushed from your browser's Click'n'Load button
+- **Containers:** Click'n'Load pages, `.dlc` containers, plain paste pages (rentry, pastebin, …), and links pushed from your browser's Click'n'Load button
 - **Hosts:** pixeldrain, gofile and MEGA, including folders and passwords, with optional accounts
+- **Preferred hosts:** each file is downloaded from your favourite host that has it; the other mirrors are kept as fallbacks
 - **Downloads:** resume after restarts, size and checksum checks, per-host limits, speed limit, low-disk guard
 - **Archives:** zip, 7z and RAR/RAR5, including multi-part sets and passwords
 - **Extras:** FlareSolverr for Cloudflare-protected pages, webhook/Discord/Apprise notifications, REST API, single-user login
@@ -67,7 +68,9 @@ Under **Containers → Add container**, give it:
 
 The default `{dir}/{filename}` keeps a remote folder's structure and collapses to just the file name for single files. Every path segment is sanitized, and nothing can escape the downloads folder.
 
-**Poll the page** fetches the URL on the interval you set. Untick it for pages Riparr can't read itself (captchas) and feed those via Click'n'Load instead. **Add links by hand** on a container's page accepts pasted host links.
+When Riparr polls a page, it reads links in this order: Click'n'Load data, then the page's `.dlc` file, then any plain host links.
+
+**Poll the page** fetches the URL on the interval you set. Untick it for pages Riparr can't read itself (captchas) and feed those via Click'n'Load instead. **Add links by hand** on a container's page accepts pasted host links or an uploaded `.dlc` file. Uploading the `.dlc` works even when Riparr itself can't reach the container site.
 
 A container whose page shows a captcha, an anti-bot challenge or a password prompt is marked **Needs attention** on the dashboard, with the reason.
 
@@ -82,6 +85,22 @@ Riparr speaks JDownloader's Click'n'Load protocol on port 9666. Click the CNL bu
 This is how captcha-protected containers work: solve the captcha in your browser, then click Click'n'Load.
 
 > **Browser on a different machine?** CNL buttons post to `127.0.0.1:9666`, which is the computer running the browser. Forward that port to the Riparr host, for example `ssh -N -L 9666:localhost:9666 you@homelab`, or use a userscript such as *Click'n'Load Interceptor* that redirects the request.
+
+### DLC containers
+
+`.dlc` files are decrypted the way JDownloader and pyLoad do it, which needs one request to JDownloader's DLC service (`service.jdownloader.org`). A `.dlc` can come from three places:
+- the container page, when Riparr polls it;
+- a file you upload on the container page;
+- a Click'n'Load v1 button, which posts the DLC to the listener.
+
+If JDownloader's service is unreachable, Riparr falls back to the page's plain links, or marks the container as needing attention.
+
+### Preferred hosts
+
+Containers usually list the same files on several hosts. Under **Settings → Downloads → Preferred hosts**, order the hosts; the default is gofile, then pixeldrain, then MEGA.
+- **Choosing a copy:** Riparr resolves a container's new links first, matches identical files by name and size, and downloads each file from the highest-ranked host that has it.
+- **Fallbacks:** the other copies are kept on standby. If the chosen host goes offline, keeps failing or rate-limits you, the next copy takes over.
+- **Mirror links:** a link whose files all came from other hosts is marked **mirror**.
 
 ### Hosts and accounts
 

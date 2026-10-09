@@ -14,6 +14,7 @@ import {
   setContainerEnabled,
   updateContainer,
 } from "@/lib/containers";
+import { decryptDlc, dlcLinks } from "@/lib/crawlers";
 import { logEvent } from "@/lib/events";
 import { addLinks, getLink, requeueLink, setLinkStatus } from "@/lib/links";
 
@@ -127,4 +128,24 @@ export async function retryExtractions(formData: FormData) {
   await requireSession();
   sendCommand({ type: "extract_container", containerId: parseId(formData.get("id")) });
   refresh();
+}
+
+export async function importDlc(_prev: AddLinksState, formData: FormData): Promise<AddLinksState> {
+  await requireSession();
+  const container = getContainer(parseId(formData.get("id")));
+  if (!container) return { error: "Container no longer exists" };
+  const file = formData.get("dlc");
+  if (!(file instanceof File) || file.size === 0) return { error: "Choose a .dlc file" };
+  if (file.size > 2 * 1024 * 1024) return { error: "That file is too large to be a DLC container" };
+
+  try {
+    const urls = dlcLinks(await decryptDlc(await file.text()));
+    if (urls.length === 0) return { error: "The DLC container has no links" };
+    const added = addLinks(container.id, urls);
+    logEvent("info", `Imported ${file.name}: ${added} new of ${urls.length} link(s)`, container.id);
+    refresh();
+    return { message: `Imported ${added} new link(s)${urls.length > added ? `, ${urls.length - added} already known` : ""}` };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
 }

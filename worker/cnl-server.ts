@@ -1,6 +1,6 @@
 import http from "node:http";
 import { receiveClickNLoad } from "@/lib/clicknload";
-import { decryptCnl2 } from "@/lib/crawlers";
+import { decryptCnl2, decryptDlc, dlcLinks } from "@/lib/crawlers";
 
 const MAX_BODY = 1024 * 1024;
 
@@ -49,7 +49,7 @@ export async function handleCnl(req: http.IncomingMessage, res: http.ServerRespo
     if (path === "/flash" || path === "/") return reply(res, 200, "JDownloader");
     return reply(res, 404, "Not found");
   }
-  if (req.method !== "POST" || (path !== "/flash/addcrypted2" && path !== "/flash/add")) {
+  if (req.method !== "POST" || !["/flash/addcrypted2", "/flash/addcrypted", "/flash/add"].includes(path)) {
     return reply(res, 404, "Not found");
   }
 
@@ -59,7 +59,9 @@ export async function handleCnl(req: http.IncomingMessage, res: http.ServerRespo
     const links =
       path === "/flash/addcrypted2"
         ? decryptCnl2(form.get("jk") ?? "", form.get("crypted") ?? "")
-        : (form.get("urls") ?? "").split(/[\r\n]+/);
+        : path === "/flash/addcrypted" // Click'n'Load v1: `crypted` is a whole DLC container
+          ? dlcLinks(await decryptDlc(form.get("crypted") ?? ""))
+          : (form.get("urls") ?? "").split(/[\r\n]+/);
     const result = receiveClickNLoad(links, source, form.get("passwords")?.trim() || null);
     console.log(`[riparr] click'n'load: ${result.added}/${result.received} new link(s) from ${source ?? "unknown page"}`);
     return reply(res, 200, "success\r\n");
