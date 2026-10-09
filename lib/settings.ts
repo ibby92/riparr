@@ -1,4 +1,7 @@
 import { one, run } from "./db";
+import type { NotifyEvent } from "./notify-events";
+
+export { NOTIFY_EVENTS, type NotifyEvent } from "./notify-events";
 
 export function getSetting(key: string): string | undefined {
   return one<{ value: string }>("SELECT value FROM settings WHERE key = ?", key)?.value;
@@ -36,7 +39,19 @@ export type AppSettings = {
   /** Where Click'n'Load links from unknown pages go, relative to the downloads folder. */
   cnlTargetDir: string;
   cnlTemplate: string;
+  /** Extract finished archives (zip/rar/7z, incl. multi-part) in place. */
+  extractEnabled: boolean;
+  /** Delete archive volumes after a successful extraction. */
+  extractDeleteArchives: boolean;
+  /** FlareSolverr base URL for Cloudflare-protected container pages; "" = off. */
+  flaresolverrUrl: string;
+  notifyWebhookUrl: string;
+  /** Apprise API notify endpoint, e.g. http://apprise:8000/notify/riparr. */
+  notifyAppriseUrl: string;
+  notifyEvents: NotifyEvent[];
 };
+
+
 
 export const DEFAULT_SETTINGS: AppSettings = {
   concurrency: 3,
@@ -45,6 +60,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   cnlEnabled: true,
   cnlTargetDir: "clicknload",
   cnlTemplate: "{container}/{dir}/{filename}",
+  extractEnabled: true,
+  extractDeleteArchives: false,
+  flaresolverrUrl: "",
+  notifyWebhookUrl: "",
+  notifyAppriseUrl: "",
+  notifyEvents: ["download_done", "download_failed", "needs_attention"],
 };
 
 const SETTING_KEYS: Record<keyof AppSettings, string> = {
@@ -54,6 +75,12 @@ const SETTING_KEYS: Record<keyof AppSettings, string> = {
   cnlEnabled: "cnl.enabled",
   cnlTargetDir: "cnl.target_dir",
   cnlTemplate: "cnl.template",
+  extractEnabled: "extract.enabled",
+  extractDeleteArchives: "extract.delete_archives",
+  flaresolverrUrl: "flaresolverr.url",
+  notifyWebhookUrl: "notify.webhook_url",
+  notifyAppriseUrl: "notify.apprise_url",
+  notifyEvents: "notify.events",
 };
 
 export function getSettings(): AppSettings {

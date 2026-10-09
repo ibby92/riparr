@@ -3,6 +3,11 @@ export type CrawlOptions = {
   signal: AbortSignal;
   /** Injected for tests; defaults to global fetch. */
   fetch?: typeof fetch;
+  /**
+   * FlareSolverr base URL (e.g. http://flaresolverr:8191). When set, pages behind a
+   * Cloudflare/DDoS-Guard challenge are retried through it. Optional for backward compatibility.
+   */
+  flaresolverrUrl?: string | null;
 };
 
 export type CrawlResult = {

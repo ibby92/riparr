@@ -16,6 +16,7 @@ export type Link = {
   retry_at: number | null;
   discovered_at: number;
   updated_at: number | null;
+  archive_password: string | null;
 };
 
 export type LinkWithProgress = Link & {
@@ -42,12 +43,15 @@ export type FileRow = {
   updated_at: number;
 };
 
-/** Stores newly discovered links. Already-known links are ignored. Returns how many were new. */
-export function addLinks(containerId: number, urls: string[]): number {
+/**
+ * Stores newly discovered links. Already-known links are ignored. Returns how many were new.
+ * `archivePassword` (e.g. from Click'n'Load) is kept for extraction.
+ */
+export function addLinks(containerId: number, urls: string[], archivePassword: string | null = null): number {
   const db = getDb();
   const insert = db.prepare(
-    `INSERT INTO links (container_id, url, fingerprint, host, discovered_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO links (container_id, url, fingerprint, host, discovered_at, updated_at, archive_password)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (container_id, fingerprint) DO NOTHING`,
   );
   const now = Date.now();
@@ -55,7 +59,7 @@ export function addLinks(containerId: number, urls: string[]): number {
   db.exec("BEGIN IMMEDIATE");
   try {
     for (const url of urls) {
-      const result = insert.run(containerId, url, normalizeLinkUrl(url), hostIdFor(url), now, now);
+      const result = insert.run(containerId, url, normalizeLinkUrl(url), hostIdFor(url), now, now, archivePassword);
       added += Number(result.changes);
     }
     db.exec("COMMIT");
@@ -109,6 +113,16 @@ export function getLink(id: number): Link | undefined {
 
 export function listFiles(linkId: number): FileRow[] {
   return all<FileRow>("SELECT * FROM files WHERE link_id = ? ORDER BY dir, remote_name", linkId);
+}
+
+/** Links of a container that are still waiting or in flight. */
+export function pendingLinkCount(containerId: number): number {
+  return (
+    one<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM links WHERE container_id = ? AND status IN ('new', 'queued', 'resolving', 'downloading')",
+      containerId,
+    )?.n ?? 0
+  );
 }
 
 /** Links ready to process: new, or queued with no pending retry delay, in enabled containers. */

@@ -5,7 +5,9 @@ export type Command =
   | { type: "check_now"; containerId: number }
   /** Abort an in-flight download; the link's new status was already written by the UI. */
   | { type: "cancel_link"; linkId: number }
-  | { type: "cancel_container"; containerId: number };
+  | { type: "cancel_container"; containerId: number }
+  /** Retry archives that failed or needed a password (e.g. after the password changed). */
+  | { type: "extract_container"; containerId: number };
 
 type CommandRow = { id: number; type: string; payload: string };
 

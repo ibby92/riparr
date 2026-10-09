@@ -31,7 +31,7 @@ function containerName(source: URL | null) {
  * container whose URL matches `source`, else to a new non-polled container
  * for that page (or a shared fallback when there is no source).
  */
-export function receiveClickNLoad(rawLinks: string[], source: string | null) {
+export function receiveClickNLoad(rawLinks: string[], source: string | null, archivePassword: string | null = null) {
   const links = rawLinks.filter((l) => /^https?:\/\//i.test(l.trim())).map((l) => l.trim());
   const sourceKey = source ? normalizePageUrl(source) : null;
   const lookupKey = sourceKey ?? FALLBACK_URL.replace(/\/$/, "");
@@ -54,7 +54,7 @@ export function receiveClickNLoad(rawLinks: string[], source: string | null) {
     created = true;
   }
 
-  const added = links.length ? addLinks(container.id, links) : 0;
+  const added = links.length ? addLinks(container.id, links, archivePassword) : 0;
   logEvent(
     "info",
     `Click'n'Load: received ${links.length} link(s), ${added} new${created ? " (new container)" : ""}`,

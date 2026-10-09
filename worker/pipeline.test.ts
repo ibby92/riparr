@@ -20,6 +20,9 @@ const { httpOpener } = await import("@/lib/hosts/http");
 const { listFiles, listLinks } = await import("@/lib/links");
 const { checkContainer } = await import("./check");
 const { scheduleDownloads } = await import("./pipeline");
+const { findSevenZip } = await import("./extract");
+const { one } = await import("@/lib/db");
+const { execFileSync } = await import("node:child_process");
 
 const files: Record<string, Buffer> = {
   "a.bin": crypto.randomBytes(200_000),
@@ -45,6 +48,11 @@ function cnl2Page(links: string[]) {
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url!, base);
+  if (url.pathname === "/crate2") {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(cnl2Page([`${base}/u/show.zip`]));
+    return;
+  }
   if (url.pathname === "/crate") {
     res.writeHead(200, { "content-type": "text/html" });
     res.end(cnl2Page(published.map((name) => `${base}/u/${name}`)));
@@ -159,5 +167,44 @@ describe("pipeline", () => {
     expect(fs.readFileSync(downloaded("c.bin")).equals(files["c.bin"])).toBe(true);
     // a.bin wasn't fetched twice, so no "(1)" duplicate exists.
     expect(fs.readdirSync(path.dirname(downloaded("a.bin"))).sort()).toEqual(["a.bin", "b.bin", "c.bin"]);
+  });
+});
+
+const sevenZip = await findSevenZip();
+
+describe.skipIf(!sevenZip)("pipeline + extraction", () => {
+  it("extracts a downloaded password-protected archive with the container's password", async () => {
+    const work = fs.mkdtempSync(path.join(tmp, "zip-"));
+    fs.writeFileSync(path.join(work, "Episode 01.mkv"), crypto.randomBytes(30_000));
+    execFileSync(sevenZip!, ["a", "-tzip", "-ps3cret", "-mem=AES256", path.join(work, "show.zip"), path.join(work, "Episode 01.mkv")]);
+    files["show.zip"] = fs.readFileSync(path.join(work, "show.zip"));
+
+    const id = createContainer(
+      containerInput.parse({
+        name: "Zipped",
+        url: `${base}/crate2`,
+        password: "s3cret",
+        poll_interval_min: "30",
+        target_dir: "tv",
+        path_template: "{container}/{filename}",
+        enabled: "on",
+        poll: "on",
+      }),
+    );
+    expect(await checkContainer(getContainer(id)!, new AbortController().signal)).toMatchObject({ newLinks: 1 });
+    await drain(id);
+
+    const extraction = async () => {
+      for (let i = 0; i < 200; i++) {
+        const row = one<{ status: string; files: number }>("SELECT status, files FROM extractions WHERE container_id = ?", id);
+        if (row && row.status !== "incomplete") return row;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      throw new Error("extraction never finished");
+    };
+    expect(await extraction()).toEqual({ status: "extracted", files: 1 });
+    const out = path.join(tmp, "downloads", "tv", "Zipped");
+    expect(fs.readdirSync(out).sort()).toEqual(["Episode 01.mkv", "show.zip"]);
+    expect(fs.readFileSync(path.join(out, "Episode 01.mkv")).equals(fs.readFileSync(path.join(work, "Episode 01.mkv")))).toBe(true);
   });
 });

@@ -3,6 +3,7 @@
 import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { requireSession } from "@/lib/session";
 import { sendCommand } from "@/lib/commands";
 import {
   containerInput,
@@ -14,8 +15,6 @@ import {
   updateContainer,
 } from "@/lib/containers";
 import { getLink, requeueLink, setLinkStatus } from "@/lib/links";
-
-// TODO(phase 4): verify auth in every action once Riparr has a login.
 
 export type FormState = {
   errors?: Record<string, string[] | undefined>;
@@ -31,6 +30,7 @@ function parseId(value: FormDataEntryValue | null): number {
 }
 
 export async function saveContainer(_prev: FormState, formData: FormData): Promise<FormState> {
+  await requireSession();
   const rawId = formData.get("id");
   const id = rawId ? parseId(rawId) : null;
 
@@ -49,8 +49,10 @@ export async function saveContainer(_prev: FormState, formData: FormData): Promi
 
   let savedId: number;
   if (id) {
-    if (!getContainer(id)) return { message: "Container no longer exists", values };
+    const before = getContainer(id);
+    if (!before) return { message: "Container no longer exists", values };
     updateContainer(id, parsed.data);
+    if (before.password !== parsed.data.password) sendCommand({ type: "extract_container", containerId: id });
     savedId = id;
   } else {
     savedId = createContainer(parsed.data);
@@ -60,6 +62,7 @@ export async function saveContainer(_prev: FormState, formData: FormData): Promi
 }
 
 export async function removeContainer(formData: FormData) {
+  await requireSession();
   const id = parseId(formData.get("id"));
   deleteContainer(id);
   sendCommand({ type: "cancel_container", containerId: id });
@@ -67,6 +70,7 @@ export async function removeContainer(formData: FormData) {
 }
 
 export async function toggleContainer(formData: FormData) {
+  await requireSession();
   const id = parseId(formData.get("id"));
   const enabled = formData.get("enabled") === "1";
   setContainerEnabled(id, enabled);
@@ -76,11 +80,13 @@ export async function toggleContainer(formData: FormData) {
 }
 
 export async function retryLink(formData: FormData) {
+  await requireSession();
   requeueLink(parseId(formData.get("id")));
   refresh();
 }
 
 export async function ignoreLink(formData: FormData) {
+  await requireSession();
   const link = getLink(parseId(formData.get("id")));
   if (!link) return;
   setLinkStatus(link.id, "ignored");
@@ -89,6 +95,7 @@ export async function ignoreLink(formData: FormData) {
 }
 
 export async function checkNow(formData: FormData) {
+  await requireSession();
   sendCommand({ type: "check_now", containerId: parseId(formData.get("id")) });
   refresh();
 }

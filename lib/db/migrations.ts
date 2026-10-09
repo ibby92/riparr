@@ -96,6 +96,22 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE containers ADD COLUMN poll INTEGER NOT NULL DEFAULT 1;
   `,
+  // Archive extraction.
+  `
+  -- Passwords that arrived with the link (Click'n'Load "passwords" field).
+  ALTER TABLE links ADD COLUMN archive_password TEXT;
+
+  CREATE TABLE extractions (
+    id           INTEGER PRIMARY KEY,
+    container_id INTEGER NOT NULL REFERENCES containers(id) ON DELETE CASCADE,
+    -- Entry volume, relative to the downloads root.
+    entry_path   TEXT    NOT NULL UNIQUE,
+    status       TEXT    NOT NULL CHECK (status IN ('extracted', 'incomplete', 'wrong_password', 'failed')),
+    error        TEXT,
+    files        INTEGER NOT NULL DEFAULT 0,
+    updated_at   INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function migrate(db: DatabaseSync) {

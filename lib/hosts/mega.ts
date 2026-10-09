@@ -1,5 +1,6 @@
 import { Readable } from "node:stream";
-import { File as MegaFile } from "megajs";
+// Type-only at module level: the web app imports this file for URL parsing and must never load megajs.
+import type { File as MegaFile } from "megajs";
 import { HostOfflineError, NeedsAttentionError, RateLimitError } from "@/lib/errors";
 import type { HostResolver, OpenedStream, RemoteFile } from "./types";
 
@@ -146,7 +147,9 @@ export const mega: HostResolver = {
     if (!link.key) throw new NeedsAttentionError("mega: link has no decryption key");
     let root: MegaFile;
     try {
-      const file = new MegaFile({
+      // turbopackIgnore keeps megajs out of the Next build; the worker's esbuild bundle includes it.
+      const { File } = await import(/* turbopackIgnore: true */ "megajs");
+      const file = new File({
         downloadId: link.id,
         key: link.key,
         directory: link.kind === "folder",

@@ -60,7 +60,7 @@ export async function handleCnl(req: http.IncomingMessage, res: http.ServerRespo
       path === "/flash/addcrypted2"
         ? decryptCnl2(form.get("jk") ?? "", form.get("crypted") ?? "")
         : (form.get("urls") ?? "").split(/[\r\n]+/);
-    const result = receiveClickNLoad(links, source);
+    const result = receiveClickNLoad(links, source, form.get("passwords")?.trim() || null);
     console.log(`[riparr] click'n'load: ${result.added}/${result.received} new link(s) from ${source ?? "unknown page"}`);
     return reply(res, 200, "success\r\n");
   } catch (err) {

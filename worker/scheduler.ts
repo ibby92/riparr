@@ -1,5 +1,6 @@
 import { dueContainers, recordCheck, type Container } from "@/lib/containers";
 import { logEvent } from "@/lib/events";
+import { notify } from "@/lib/notify";
 import { checkContainer } from "./check";
 
 const MINUTE = 60_000;
@@ -43,8 +44,10 @@ async function check(container: Container, signal: AbortSignal) {
       logEvent("error", `Check failed: ${result.error}`, container.id);
     } else if (result.status === "needs_attention" && container.status !== "needs_attention") {
       logEvent("warn", result.error ?? "Needs attention", container.id);
+      void notify({ event: "needs_attention", message: result.error ?? "Needs attention", container });
     } else if (result.newLinks > 0) {
       logEvent("info", `Found ${result.newLinks} new link(s) via ${result.source}`, container.id);
+      void notify({ event: "new_links", message: `Found ${result.newLinks} new link(s)`, container });
     }
   } catch (err) {
     if (signal.aborted) return;

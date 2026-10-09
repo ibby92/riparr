@@ -6,6 +6,7 @@ import { downloadFile } from "@/lib/download";
 import { HostOfflineError, NeedsAttentionError, RateLimitError } from "@/lib/errors";
 import { logEvent } from "@/lib/events";
 import { hostAccount } from "@/lib/host-accounts";
+import { notify } from "@/lib/notify";
 import { findResolver } from "@/lib/hosts";
 import type { RemoteFile } from "@/lib/hosts/types";
 import {
@@ -17,6 +18,7 @@ import {
   type Link,
 } from "@/lib/links";
 import { renderTemplate, resolveInside } from "@/lib/paths";
+import { linkSettled } from "./extract-runner";
 import { getSettings } from "@/lib/settings";
 
 const MINUTE = 60_000;
@@ -128,6 +130,8 @@ async function processLink(link: Link, signal: AbortSignal) {
     setLinkStatus(link.id, "done", { attempts: 0 });
     const names = remote.length === 1 ? remote[0].name : `${remote.length} files`;
     logEvent("info", `Downloaded ${names}`, link.container_id);
+    void notify({ event: "download_done", message: `Downloaded ${names}`, container });
+    linkSettled(link.container_id);
   } catch (err) {
     handleFailure(link, current.attempts, err, signal);
   }
@@ -185,6 +189,7 @@ function handleFailure(link: Link, attempts: number, err: unknown, signal: Abort
   if (err instanceof HostOfflineError) {
     setLinkStatus(link.id, "offline", { error: message, attempts });
     logEvent("warn", `Offline: ${link.url} (${message})`, link.container_id);
+    linkSettled(link.container_id);
     return;
   }
   if (err instanceof RateLimitError) {
@@ -198,6 +203,9 @@ function handleFailure(link: Link, attempts: number, err: unknown, signal: Abort
   if (err instanceof NeedsAttentionError || next >= MAX_ATTEMPTS) {
     setLinkStatus(link.id, "failed", { error: message, attempts: next });
     logEvent("error", `Failed: ${link.url} (${message})`, link.container_id);
+    const container = getContainer(link.container_id);
+    void notify({ event: "download_failed", message: `${link.url}: ${message}`, container });
+    linkSettled(link.container_id);
     return;
   }
   setLinkStatus(link.id, "queued", { error: message, attempts: next, retryAt: Date.now() + retryDelay(next) });

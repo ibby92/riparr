@@ -5,6 +5,7 @@ import { recoverInterrupted } from "@/lib/links";
 import { logEvent, pruneEvents } from "@/lib/events";
 import { getSettings, HEARTBEAT_INTERVAL_MS, writeHeartbeat } from "@/lib/settings";
 import { startCnlServer } from "./cnl-server";
+import { linkSettled, resetFailedExtractions, stopExtraction } from "./extract-runner";
 import { cancelContainer, cancelLink, scheduleDownloads } from "./pipeline";
 import { runDueChecks } from "./scheduler";
 
@@ -27,6 +28,10 @@ function handle(command: Command) {
       break;
     case "cancel_container":
       cancelContainer(command.containerId);
+      break;
+    case "extract_container":
+      resetFailedExtractions(command.containerId);
+      linkSettled(command.containerId); // rescans now, or when its downloads finish
       break;
   }
 }
@@ -79,6 +84,7 @@ async function main() {
     console.log(`[riparr] ${signal} received, stopping worker`);
     timers.forEach(clearInterval);
     cnl?.close();
+    stopExtraction();
     shutdown.abort();
     logEvent("info", "Worker stopped");
     closeDb();

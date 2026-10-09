@@ -73,7 +73,7 @@ describe("containerInput", () => {
 describe("database", () => {
   it("migrations are idempotent", () => {
     migrate(getDb());
-    expect(getDb().prepare("PRAGMA user_version").get()).toEqual({ user_version: 3 });
+    expect(getDb().prepare("PRAGMA user_version").get()).toEqual({ user_version: 4 });
   });
 
   it("creates containers that are immediately due", () => {

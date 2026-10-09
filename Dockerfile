@@ -9,8 +9,10 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 FROM node:24-slim
-RUN apt-get update \
- && apt-get install -y --no-install-recommends gosu tini \
+# p7zip-full (7-Zip 26 on bookworm) + p7zip-rar (non-free Rar.so codec) gives `7z` with RAR4/RAR5.
+RUN sed -i 's/^Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends gosu tini p7zip-full p7zip-rar \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

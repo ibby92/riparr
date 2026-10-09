@@ -3,12 +3,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { migrate } from "./migrations";
 
+// Defaults are relative to the working directory (dev). Written without
+// process.cwd() so Next's file tracer doesn't copy the whole project into the
+// standalone build.
 export function configDir() {
-  return process.env.RIPARR_CONFIG_DIR ?? path.join(process.cwd(), "config");
+  return path.resolve(process.env.RIPARR_CONFIG_DIR || "config");
 }
 
 export function downloadsRoot() {
-  return process.env.RIPARR_DOWNLOADS_DIR ?? path.join(process.cwd(), "downloads");
+  return path.resolve(process.env.RIPARR_DOWNLOADS_DIR || "downloads");
 }
 
 // Cached on globalThis so dev-mode module reloads reuse one connection.
