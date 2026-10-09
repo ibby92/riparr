@@ -172,6 +172,13 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX files_status ON files(status);
   CREATE UNIQUE INDEX files_link_key ON files(link_id, key);
   `,
+  // Details some containers publish per link (release name, episode, quality, size).
+  `
+  ALTER TABLE links ADD COLUMN label TEXT;
+  ALTER TABLE links ADD COLUMN episode TEXT;
+  ALTER TABLE links ADD COLUMN quality TEXT;
+  ALTER TABLE links ADD COLUMN size_text TEXT;
+  `,
 ];
 
 export function migrate(db: DatabaseSync) {

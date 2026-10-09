@@ -21,6 +21,9 @@ const { listFiles, listLinks } = await import("@/lib/links");
 const { checkContainer } = await import("./check");
 const { scheduleDownloads } = await import("./pipeline");
 const { findSevenZip } = await import("./extract");
+const { makeCrateSite } = await import("@/lib/crawlers/crate-fixture");
+const crateSite = makeCrateSite("polltest");
+const crateLinks: { url: string; host: string; label: string; episode: string; quality: string; size: string }[] = [];
 const { one } = await import("@/lib/db");
 const { execFileSync } = await import("node:child_process");
 
@@ -54,6 +57,16 @@ const rawStatus = new Map<string, number>();
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url!, base);
+  if (url.pathname === "/c/polltest") {
+    res.writeHead(200, { "content-type": "text/html", "set-cookie": "sess=1; Path=/" });
+    res.end(crateSite.page);
+    return;
+  }
+  if (url.pathname === crateSite.apiPath) {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(crateSite.apiBody("Polled Show", crateLinks));
+    return;
+  }
   const mirrorCrate = /^\/mcrate\/(\w+)$/.exec(url.pathname)?.[1];
   if (mirrorCrate) {
     res.writeHead(200, { "content-type": "text/html" });
@@ -312,3 +325,59 @@ describe("pipeline + preferred hosts", () => {
     expect(saved("m3.bin").equals(files["m3.bin"])).toBe(true);
   });
 });
+
+describe("polling a JS-rendered container for new content", () => {
+  const signal = new AbortController().signal;
+  const episode = (ep: string) => {
+    const label = `Polled.Show.${ep}.1080p.mkv`;
+    files[label] = crypto.randomBytes(15_000);
+    const meta = { label, episode: ep, quality: "1080p", size: "15 KB" };
+    crateLinks.push(
+      { url: `${base}/a/${label}`, host: "hosta", ...meta },
+      { url: `${base}/b/${label}`, host: "hostb", ...meta },
+      { url: `https://unsupported-host.example/f/${ep}`, host: "elsewhere", ...meta },
+    );
+    return label;
+  };
+  const byHost = (id: number, ep: string) =>
+    Object.fromEntries(listLinks(id).filter((l) => l.episode === ep).map((l) => [l.host, l.status]));
+
+  it("downloads what's there, then picks up an episode added later", async () => {
+    (await import("@/lib/settings")).saveSettings({ hostPriority: ["hostb", "hosta"] });
+    const e01 = episode("S01E01");
+    const id = createContainer(
+      containerInput.parse({
+        name: "Polled Show",
+        url: `${base}/c/polltest`,
+        password: "",
+        poll_interval_min: "30",
+        target_dir: "tv",
+        path_template: "{container}/{filename}",
+        enabled: "on",
+        poll: "on",
+      }),
+    );
+
+    expect(await checkContainer(getContainer(id)!, signal)).toMatchObject({ status: "ok", newLinks: 3, source: "crate-api" });
+    await drain(id);
+    expect(byHost(id, "S01E01")).toEqual({ hostb: "done", hosta: "mirror", "unsupported-host.example": "ignored" });
+    expect(listLinks(id).find((l) => l.host === "hostb")).toMatchObject({ label: e01, quality: "1080p", size_text: "15 KB" });
+
+    // Nothing new: the next poll adds nothing.
+    expect(await checkContainer(getContainer(id)!, signal)).toMatchObject({ newLinks: 0 });
+
+    // The site adds the next episode; the next poll registers and downloads just that.
+    const e02 = episode("S01E02");
+    expect(await checkContainer(getContainer(id)!, signal)).toMatchObject({ newLinks: 3 });
+    await drain(id);
+    expect(byHost(id, "S01E02")).toEqual({ hostb: "done", hosta: "mirror", "unsupported-host.example": "ignored" });
+
+    const dir = path.join(tmp, "downloads", "tv", "Polled Show");
+    expect(fs.readdirSync(dir).sort()).toEqual([e01, e02]);
+    expect(fs.readFileSync(path.join(dir, e02)).equals(files[e02])).toBe(true);
+    expect(hitsFor(e01)).toEqual([`b:${e01}`]);
+    expect(hitsFor(e02)).toEqual([`b:${e02}`]);
+  });
+});
+
+const hitsFor = (name: string) => rawHits.filter((h) => h.endsWith(`:${name}`));

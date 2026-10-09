@@ -1,4 +1,5 @@
 import { dueContainers, recordCheck, type Container } from "@/lib/containers";
+import { RateLimitError } from "@/lib/errors";
 import { logEvent } from "@/lib/events";
 import { notify } from "@/lib/notify";
 import { checkContainer } from "./check";
@@ -51,6 +52,17 @@ async function check(container: Container, signal: AbortSignal) {
     }
   } catch (err) {
     if (signal.aborted) return;
+    if (err instanceof RateLimitError) {
+      // The site asked us to slow down: check again when it says, without counting a failure.
+      recordCheck(container.id, {
+        status: container.status === "pending" ? "ok" : container.status,
+        error: null,
+        changed: false,
+        nextCheckAt: Date.now() + err.retryAfterMs + Math.round(Math.random() * 30_000),
+      });
+      logEvent("info", `${err.message}; checking again later`, container.id);
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     const count = (failures.get(container.id) ?? 0) + 1;
     failures.set(container.id, count);

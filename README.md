@@ -68,7 +68,14 @@ Under **Containers → Add container**, give it:
 
 The default `{dir}/{filename}` keeps a remote folder's structure and collapses to just the file name for single files. Every path segment is sanitized, and nothing can escape the downloads folder.
 
-When Riparr polls a page, it reads links in this order: Click'n'Load data, then the page's `.dlc` file, then any plain host links.
+Every poll re-reads the page as it is now and queues only links it hasn't seen before. New episodes or files added to a container are picked up on the next check. Links are read in this order:
+
+1. **Script-loaded link lists**, as on mkvdrama.net. The page fetches an encrypted list with JavaScript. Riparr does the same without a browser, and keeps each link's release name, episode, quality and size. These sites rate-limit repeat visits, so Riparr waits as long as the site asks.
+2. **Click'n'Load data** embedded in the page.
+3. **The page's `.dlc` file.**
+4. **Plain host links** in the HTML.
+
+Hosts Riparr can't download from yet are set aside ("Riparr can't download from … yet"), not reported as failures.
 
 **Poll the page** fetches the URL on the interval you set. Untick it for pages Riparr can't read itself (captchas) and feed those via Click'n'Load instead. **Add links by hand** on a container's page accepts pasted host links or an uploaded `.dlc` file. Uploading the `.dlc` works even when Riparr itself can't reach the container site.
 

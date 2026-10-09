@@ -1,4 +1,5 @@
-import { NeedsAttentionError } from "@/lib/errors";
+import { NeedsAttentionError, RateLimitError } from "@/lib/errors";
+import { decryptCrateList, parseCrateLoader } from "./crate-api";
 import { cnl2Source, findCnl2Payloads } from "./cnl2";
 import { decryptDlc, dlcLinks } from "./dlc";
 import {
@@ -13,7 +14,7 @@ import { parseAttrs } from "./html";
 import { extractHostLinks, plainSource } from "./plain";
 import type { ContainerSource, CrawlOptions, CrawlResult } from "./types";
 
-export type { ContainerSource, CrawlOptions, CrawlResult } from "./types";
+export type { ContainerSource, CrawlOptions, CrawlResult, LinkMeta } from "./types";
 export { decryptCnl2 } from "./cnl2";
 export { decryptDlc, dlcLinks, DlcError, type DlcPackage } from "./dlc";
 export { isKnownHostUrl, KNOWN_HOST_DOMAINS } from "./known-hosts";
@@ -221,6 +222,37 @@ async function submitPassword(page: Page, password: string, opts: CrawlOptions, 
   });
 }
 
+/**
+ * Pages whose link list is loaded by script from an encrypted API (mkvdrama-style):
+ * fetch and decrypt it like the page would. Null if the page isn't one of these.
+ */
+async function crawlCrateApi(page: Page, opts: CrawlOptions): Promise<CrawlResult | null> {
+  const loader = parseCrateLoader(page.html);
+  if (!loader) return null;
+  const res = await (opts.fetch ?? fetch)(new URL(loader.apiPath, page.url), {
+    headers: {
+      ...HEADERS,
+      Accept: "application/json, */*",
+      "User-Agent": page.userAgent,
+      Referer: page.url,
+      ...(page.cookies.length ? { Cookie: page.cookies.join("; ") } : {}),
+    },
+    signal: AbortSignal.any([opts.signal, AbortSignal.timeout(TIMEOUT_MS)]),
+  });
+  if (res.status === 429) {
+    const seconds = Number(res.headers.get("retry-after")) || 15 * 60;
+    throw new RateLimitError(`Container site rate-limited us (retry in ${seconds}s)`, seconds * 1000);
+  }
+  if (!res.ok) throw new Error(`HTTP ${res.status} loading the container's link list`);
+  const body = (await res.json().catch(() => null)) as { d?: unknown } | null;
+  if (typeof body?.d !== "string") throw new Error("Container's link list has an unexpected format");
+
+  const list = decryptCrateList(body.d, loader.key, loader.iv);
+  const seen = new Set<string>();
+  const items = list.links.filter((l) => !seen.has(l.url) && seen.add(l.url));
+  return { links: items.map((l) => l.url), items, source: "crate-api" };
+}
+
 /** Downloads the page's DLC file(s) with the page's cookies and decrypts them. */
 async function crawlDlc(page: Page, opts: CrawlOptions): Promise<{ result: CrawlResult | null; error: string | null }> {
   let error: string | null = null;
@@ -261,6 +293,9 @@ async function crawlPage(page: Page, opts: CrawlOptions, endpoint: string | null
       page = submitted;
     }
   }
+
+  const crate = await crawlCrateApi(page, opts);
+  if (crate) return crate;
 
   const { result, dlcError } = await runSources(page, opts);
   if (result) return result;

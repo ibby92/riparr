@@ -1,4 +1,5 @@
 import { all, getDb, one, run } from "./db";
+import type { LinkMeta } from "./crawlers/types";
 import { hostIdFor, normalizeLinkUrl } from "./hosts";
 
 export type LinkStatus =
@@ -30,6 +31,11 @@ export type Link = {
   archive_password: string | null;
   /** When the link's files became known; null until first resolved. */
   resolved_at: number | null;
+  /** Details the container published for this link, if any. */
+  label: string | null;
+  episode: string | null;
+  quality: string | null;
+  size_text: string | null;
 };
 
 export type LinkWithProgress = Link & {
@@ -65,11 +71,18 @@ export type FileRow = {
  * Stores newly discovered links. Already-known links are ignored. Returns how many were new.
  * `archivePassword` (e.g. from Click'n'Load) is kept for extraction.
  */
-export function addLinks(containerId: number, urls: string[], archivePassword: string | null = null): number {
+export function addLinks(
+  containerId: number,
+  urls: string[],
+  archivePassword: string | null = null,
+  meta: LinkMeta[] = [],
+): number {
   const db = getDb();
+  const byUrl = new Map(meta.map((m) => [m.url, m]));
   const insert = db.prepare(
-    `INSERT INTO links (container_id, url, fingerprint, host, discovered_at, updated_at, archive_password)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO links (container_id, url, fingerprint, host, discovered_at, updated_at, archive_password,
+                        label, episode, quality, size_text)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (container_id, fingerprint) DO NOTHING`,
   );
   const now = Date.now();
@@ -77,7 +90,20 @@ export function addLinks(containerId: number, urls: string[], archivePassword: s
   db.exec("BEGIN IMMEDIATE");
   try {
     for (const url of urls) {
-      const result = insert.run(containerId, url, normalizeLinkUrl(url), hostIdFor(url), now, now, archivePassword);
+      const m = byUrl.get(url);
+      const result = insert.run(
+        containerId,
+        url,
+        normalizeLinkUrl(url),
+        hostIdFor(url),
+        now,
+        now,
+        archivePassword,
+        m?.label ?? null,
+        m?.episode ?? null,
+        m?.quality ?? null,
+        m?.size ?? null,
+      );
       added += Number(result.changes);
     }
     db.exec("COMMIT");

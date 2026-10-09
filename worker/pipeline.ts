@@ -302,15 +302,19 @@ function handleFailure(link: Link, attempts: number, err: unknown, signal: Abort
     return;
   }
 
+  if (err instanceof UnsupportedHostError) {
+    // Containers often list hosts Riparr can't download from yet; set those aside quietly.
+    setLinkStatus(link.id, "ignored", { error: `Riparr can't download from ${link.host} yet`, attempts });
+    linkSettled(link.container_id);
+    return;
+  }
+
   const next = attempts + 1;
-  if (err instanceof UnsupportedHostError || err instanceof NeedsAttentionError || next >= MAX_ATTEMPTS) {
-    setLinkStatus(link.id, "failed", { error: message, attempts: err instanceof UnsupportedHostError ? MAX_ATTEMPTS : next });
+  if (err instanceof NeedsAttentionError || next >= MAX_ATTEMPTS) {
+    setLinkStatus(link.id, "failed", { error: message, attempts: next });
     failLinkFiles(link.id, message);
-    const level = err instanceof UnsupportedHostError ? "warn" : "error";
-    logEvent(level, `Failed: ${link.url} (${message})`, link.container_id);
-    if (!(err instanceof UnsupportedHostError)) {
-      void notify({ event: "download_failed", message: `${link.url}: ${message}`, container: getContainer(link.container_id) });
-    }
+    logEvent("error", `Failed: ${link.url} (${message})`, link.container_id);
+    void notify({ event: "download_failed", message: `${link.url}: ${message}`, container: getContainer(link.container_id) });
     linkSettled(link.container_id);
     return;
   }

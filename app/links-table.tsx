@@ -77,9 +77,20 @@ export function LinksTable({
                 <td className="max-w-md px-4 py-2">
                   <div className="truncate" title={l.url}>
                     <span className="mr-2 rounded bg-zinc-500/15 px-1.5 py-0.5 text-xs">{l.host}</span>
-                    {l.url}
+                    {l.label ?? l.url}
                   </div>
-                  {l.error && l.status !== "done" && <div className="mt-1 text-xs text-red-500">{l.error}</div>}
+                  {(l.episode || l.quality || l.size_text) && (
+                    <div className="mt-1 flex gap-1.5 text-xs text-muted">
+                      {[l.episode, l.quality, l.size_text].filter(Boolean).map((v) => (
+                        <span key={v} className="rounded border border-border px-1.5">
+                          {v}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {l.error && l.status !== "done" && (
+                    <div className={`mt-1 text-xs ${l.status === "ignored" ? "text-muted" : "text-red-500"}`}>{l.error}</div>
+                  )}
                 </td>
                 {showContainer && (
                   <td className="px-4 py-2">
@@ -124,7 +135,7 @@ export function LinksTable({
                 </td>
                 <td className="px-4 py-2">
                   <div className="flex justify-end gap-2">
-                    {RETRYABLE.includes(l.status) && (
+                    {RETRYABLE.includes(l.status) && !isStandby(l) && (
                       <form action={retryLink}>
                         <input type="hidden" name="id" value={l.id} />
                         <button className="btn">{l.status === "queued" ? "Retry now" : "Retry"}</button>

@@ -10,9 +10,20 @@ export type CrawlOptions = {
   flaresolverrUrl?: string | null;
 };
 
+/** Extra details some containers publish per link (shown in the UI). */
+export type LinkMeta = {
+  url: string;
+  label?: string;
+  episode?: string;
+  quality?: string;
+  size?: string;
+};
+
 export type CrawlResult = {
   /** Host links found in the container (gofile, pixeldrain, mega, …), deduplicated, in page order. */
   links: string[];
+  /** Per-link details, when the container provides them. */
+  items?: LinkMeta[];
   /** Which source produced the links, e.g. "cnl2", "plain". Shown in the activity log. */
   source: string;
 };

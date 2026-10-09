@@ -14,12 +14,12 @@ export type CheckResult = {
 /** Crawls one container and stores any links not seen before. */
 export async function checkContainer(container: Container, signal: AbortSignal): Promise<CheckResult> {
   try {
-    const { links, source } = await crawlContainer(container.url, {
+    const { links, items, source } = await crawlContainer(container.url, {
       password: container.password,
       signal,
       flaresolverrUrl: getSettings().flaresolverrUrl || null,
     });
-    return { status: "ok", newLinks: addLinks(container.id, links), source };
+    return { status: "ok", newLinks: addLinks(container.id, links, null, items), source };
   } catch (err) {
     if (err instanceof NeedsAttentionError) {
       return { status: "needs_attention", error: err.message, newLinks: 0 };
