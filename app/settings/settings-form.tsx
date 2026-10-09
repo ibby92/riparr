@@ -4,7 +4,7 @@ import { useActionState } from "react";
 import { HostPriority } from "./host-priority";
 import { NOTIFY_EVENTS } from "@/lib/notify-events";
 import type { AppSettings } from "@/lib/settings";
-import { checkFlareSolverr, saveAppSettings, sendTestNotification, type SettingsState, type TestState } from "./actions";
+import { checkFlareSolverr, checkProxy, saveAppSettings, sendTestNotification, type SettingsState, type TestState } from "./actions";
 
 function Field({ label, hint, errors, children }: { label: string; hint?: string; errors?: string[]; children: React.ReactNode }) {
   return (
@@ -21,7 +21,7 @@ function Field({ label, hint, errors, children }: { label: string; hint?: string
   );
 }
 
-export function SettingsForm({ settings }: { settings: AppSettings }) {
+export function SettingsForm({ settings, envProxy }: { settings: AppSettings; envProxy: boolean }) {
   const [state, action, pending] = useActionState<SettingsState, FormData>(saveAppSettings, {});
   const errors = state.errors ?? {};
   const mb = settings.bytesPerSecond / 1024 / 1024;
@@ -82,6 +82,27 @@ export function SettingsForm({ settings }: { settings: AppSettings }) {
       <fieldset className="space-y-4">
         <legend className="mb-2 font-medium">Integrations</legend>
         <Field
+          label="Proxy"
+          hint={
+            envProxy && !settings.proxyUrl
+              ? "Using RIPARR_PROXY_URL from the environment. Enter a URL here to override it."
+              : "e.g. http://gluetun:8888 or socks5://user:pass@host:1080, to reach container sites your network blocks. Leave empty for direct."
+          }
+          errors={errors.proxyUrl}
+        >
+          <input name="proxyUrl" className="input font-mono" defaultValue={settings.proxyUrl} placeholder="http://gluetun:8888" autoComplete="off" />
+        </Field>
+        <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+          <label className="flex items-center gap-2">
+            <input type="radio" name="proxyScope" value="containers" defaultChecked={settings.proxyScope !== "all"} />
+            Container sites only (downloads stay on your own connection)
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="radio" name="proxyScope" value="all" defaultChecked={settings.proxyScope === "all"} />
+            Everything (MEGA excepted)
+          </label>
+        </div>
+        <Field
           label="FlareSolverr URL"
           hint="e.g. http://flaresolverr:8191, for container pages behind a Cloudflare challenge. Leave empty to disable."
           errors={errors.flaresolverrUrl}
@@ -134,6 +155,7 @@ export function IntegrationTests() {
     <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
       <TestButton label="Send test notification" run={sendTestNotification} />
       <TestButton label="Test FlareSolverr" run={checkFlareSolverr} />
+      <TestButton label="Test proxy" run={checkProxy} />
       <span className="text-xs text-muted">Tests use saved settings.</span>
     </div>
   );

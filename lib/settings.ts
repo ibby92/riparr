@@ -47,6 +47,9 @@ export type AppSettings = {
   extractEnabled: boolean;
   /** Delete archive volumes after a successful extraction. */
   extractDeleteArchives: boolean;
+  /** Outbound proxy (http://, https://, socks5://) for container sites, or everything; "" = direct. */
+  proxyUrl: string;
+  proxyScope: "containers" | "all";
   /** FlareSolverr base URL for Cloudflare-protected container pages; "" = off. */
   flaresolverrUrl: string;
   notifyWebhookUrl: string;
@@ -68,6 +71,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   cnlTemplate: "{container}/{dir}/{filename}",
   extractEnabled: true,
   extractDeleteArchives: false,
+  proxyUrl: "",
+  proxyScope: "containers",
   flaresolverrUrl: "",
   notifyWebhookUrl: "",
   notifyAppriseUrl: "",
@@ -85,6 +90,8 @@ const SETTING_KEYS: Record<keyof AppSettings, string> = {
   cnlTemplate: "cnl.template",
   extractEnabled: "extract.enabled",
   extractDeleteArchives: "extract.delete_archives",
+  proxyUrl: "proxy.url",
+  proxyScope: "proxy.scope",
   flaresolverrUrl: "flaresolverr.url",
   notifyWebhookUrl: "notify.webhook_url",
   notifyAppriseUrl: "notify.apprise_url",

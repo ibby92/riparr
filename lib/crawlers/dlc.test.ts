@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { NeedsAttentionError } from "@/lib/errors";
-import { decryptDlc, DlcError, dlcLinks, parseDlcXml, splitDlc } from "./dlc";
+import { decryptDlc, DlcError, dlcLinks, metaFromFileName, parseDlcXml, splitDlc } from "./dlc";
 import { makeDlc } from "./dlc-fixture";
 import { crawlContainer, findDlcUrls } from "./index";
 
@@ -23,7 +23,7 @@ describe("decryptDlc", () => {
   it("decrypts packages and links via the service key", async () => {
     const dlc = makeDlc([{ name: "Show S01", links }, { name: "Extras", links: ["https://mega.nz/file/a#k", links[0]] }]);
     const packages = await decryptDlc(dlc.file, { fetch: fakeService(dlc.rc, dlc.serviceKey) });
-    expect(packages).toEqual([
+    expect(packages).toMatchObject([
       { name: "Show S01", links },
       { name: "Extras", links: ["https://mega.nz/file/a#k", links[0]] },
     ]);
@@ -52,7 +52,7 @@ describe("decryptDlc", () => {
 
   it("ignores non-http URLs and doesn't expand XML entities", () => {
     const xml = `<!DOCTYPE x [<!ENTITY e "boom">]><dlc><content><package name="${b64("p")}"><file><url>${b64("javascript:alert(1)")}</url></file><file><url>${b64("https://ok.example/f")}</url></file><file><url>&e;</url></file></package></content></dlc>`;
-    expect(parseDlcXml(xml)).toEqual([{ name: "p", links: ["https://ok.example/f"] }]);
+    expect(parseDlcXml(xml)).toMatchObject([{ name: "p", links: ["https://ok.example/f"] }]);
   });
 });
 
@@ -87,7 +87,7 @@ describe("crawlContainer with DLC", () => {
       signal,
       fetch: site(`<a href="/c/1/container.dlc">Download DLC</a>`, dlc.file, dlc.rc),
     });
-    expect(result).toEqual({ links, source: "dlc" });
+    expect(result).toMatchObject({ links, source: "dlc" });
   });
 
   it("falls back to plain links when the DLC can't be decrypted", async () => {
@@ -104,5 +104,51 @@ describe("crawlContainer with DLC", () => {
     await expect(
       crawlContainer("https://crate.example/c/1", { password: null, signal, fetch: site(`<a href="/x.dlc">DLC</a>`, "garbage!", null) }),
     ).rejects.toThrow(NeedsAttentionError);
+  });
+});
+
+describe("metaFromFileName", () => {
+  it.each([
+    [
+      "Irreplaceable.S01E02.NF.x264.1080p[MkvDrama.net].mkv 665.21 MB",
+      { label: "Irreplaceable.S01E02.NF.x264.1080p[MkvDrama.net].mkv", episode: "S01E02", quality: "1080p", size: "665.21 MB" },
+    ],
+    ["Movie.2024.2160p.mkv", { label: "Movie.2024.2160p.mkv", episode: undefined, quality: "2160p", size: undefined }],
+    ["show s2e14 720P 1.4 GiB", { label: "show s2e14 720P", episode: "S2E14", quality: "720p", size: "1.4 GiB" }],
+  ])("%j", (name, meta) => {
+    expect(metaFromFileName(name)).toEqual(meta);
+  });
+});
+
+describe("crawlContainer on viewcrate-style pages (DLC export)", () => {
+  it("polls the site's DLC export and keeps per-file details", async () => {
+    const dlc = makeDlc([{ name: "Show S01", links: ["https://pixeldrain.com/u/e1", "https://gofile.io/d/e1"] }]);
+    // makeDlc has no filenames; add them so per-file details can be checked.
+    const seen: string[] = [];
+    const page = `<html><title>ViewCrate</title>
+      <script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>
+      <div id="r1" data-bootstrap-url="/c/abc123/bootstrap" data-resolve-url="/c/abc123/resolve-link" data-open-base-url="/c/abc123/open"></div></html>`;
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      const u = new URL(String(input));
+      seen.push(`${u.pathname}${new Headers(init?.headers).get("cookie") ? " +cookie" : ""}`);
+      if (u.hostname === "service.jdownloader.org") return new Response(`<rc>${dlc.rc}</rc>`);
+      if (u.pathname === "/api/dlc_url/abc123") return Response.json({ url: "/dlc/abc123.dlc?t=1" });
+      if (u.pathname === "/dlc/abc123.dlc") return new Response(dlc.file);
+      return new Response(page, { headers: { "set-cookie": "vc_viewer=x; Path=/" } });
+    }) as typeof fetch;
+
+    const result = await crawlContainer("https://viewcrate.example/c/abc123", { password: null, signal: new AbortController().signal, fetch: fetchImpl });
+    expect(result).toMatchObject({ source: "dlc-export", links: ["https://pixeldrain.com/u/e1", "https://gofile.io/d/e1"] });
+    expect(seen).toEqual(["/c/abc123", "/api/dlc_url/abc123 +cookie", "/dlc/abc123.dlc +cookie", "/dlcrypt/service.php"]);
+  });
+
+  it("doesn't mistake Cloudflare's passive detection script for a challenge", async () => {
+    const page = `<title>Normal</title><script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script> https://pixeldrain.com/u/ok1`;
+    const result = await crawlContainer("https://site.example/x", {
+      password: null,
+      signal: new AbortController().signal,
+      fetch: (async () => new Response(page)) as unknown as typeof fetch,
+    });
+    expect(result).toMatchObject({ source: "plain", links: ["https://pixeldrain.com/u/ok1"] });
   });
 });

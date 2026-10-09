@@ -1,0 +1,34 @@
+# Sends Riparr's requests to container sites through NordVPN (via gluetun), for sites
+# your network blocks. Downloads stay on your own connection unless you change the
+# proxy scope in Settings → Integrations.
+#
+#   cp .env.example .env    # fill in your NordVPN *service credentials*
+#   docker compose -f docker-compose.yml -f docker-compose.vpn.yml up -d
+#
+# Any provider gluetun supports works: https://github.com/qdm12/gluetun-wiki
+services:
+  gluetun:
+    image: qmcgaw/gluetun:v3
+    container_name: gluetun
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - VPN_SERVICE_PROVIDER=nordvpn
+      - VPN_TYPE=openvpn
+      - OPENVPN_USER=${NORDVPN_USER:?Set NORDVPN_USER in .env (NordVPN service credentials)}
+      - OPENVPN_PASSWORD=${NORDVPN_PASSWORD:?Set NORDVPN_PASSWORD in .env}
+      - SERVER_COUNTRIES=${NORDVPN_COUNTRY:-Canada}
+      # gluetun's built-in HTTP proxy; other containers reach it at gluetun:8888.
+      - HTTPPROXY=on
+      - HTTPPROXY_STEALTH=on
+      - TZ=${TZ:-Etc/UTC}
+
+  riparr:
+    environment:
+      # Used unless a proxy is set in Settings → Integrations.
+      - RIPARR_PROXY_URL=http://gluetun:8888
+    depends_on:
+      - gluetun

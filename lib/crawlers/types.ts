@@ -1,8 +1,10 @@
 export type CrawlOptions = {
   password: string | null;
   signal: AbortSignal;
-  /** Injected for tests; defaults to global fetch. */
+  /** Injected for tests; defaults to global fetch. Also used for FlareSolverr, which is local. */
   fetch?: typeof fetch;
+  /** Fetch for requests to the container site itself (page, link API, DLC); may go through a proxy. */
+  siteFetch?: typeof fetch;
   /**
    * FlareSolverr base URL (e.g. http://flaresolverr:8191). When set, pages behind a
    * Cloudflare/DDoS-Guard challenge are retried through it. Optional for backward compatibility.

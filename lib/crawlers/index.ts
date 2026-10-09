@@ -1,7 +1,7 @@
 import { NeedsAttentionError, RateLimitError } from "@/lib/errors";
 import { decryptCrateList, parseCrateLoader } from "./crate-api";
 import { cnl2Source, findCnl2Payloads } from "./cnl2";
-import { decryptDlc, dlcLinks } from "./dlc";
+import { decryptDlc, metaFromFileName, type DlcPackage } from "./dlc";
 import {
   cookiePairsFor,
   flaresolverrGet,
@@ -33,8 +33,10 @@ const HEADERS = {
   "Accept-Language": "en-US,en;q=0.9",
 };
 
+// Note: /cdn-cgi/challenge-platform/scripts/jsd/… is Cloudflare's passive bot-detection beacon on
+// ordinary pages; only the interactive challenge (/challenge-platform/h/…, _cf_chl_opt) counts.
 const CHALLENGE =
-  /cf-browser-verification|challenges\.cloudflare\.com\/cdn-cgi|\/cdn-cgi\/challenge-platform|window\._cf_chl_opt|<title>\s*(?:just a moment\.\.\.|attention required! \| cloudflare)|ddos-guard|<title>\s*ddos-guard/i;
+  /cf-browser-verification|challenges\.cloudflare\.com\/cdn-cgi|\/cdn-cgi\/challenge-platform\/h\/|window\._cf_chl_opt|<title>\s*(?:just a moment\.\.\.|attention required! \| cloudflare)|ddos-guard|<title>\s*ddos-guard/i;
 const CAPTCHA =
   /class=["'][^"']*\b(?:g-recaptcha|h-captcha|cf-turnstile|frc-captcha)\b|google\.com\/recaptcha\/|hcaptcha\.com\/1\/api\.js|challenges\.cloudflare\.com\/turnstile|<input[^>]+name=["']?(?:captcha|captcha_code|recaptcha_response_field)\b|id=["']captcha/i;
 const WRONG_PASSWORD = /(?:wrong|incorrect|invalid|falsches)\s+(?:password|passwort|pass)/i;
@@ -88,6 +90,11 @@ type Identity = { cookies: string[]; userAgent: string };
 
 const DEFAULT_IDENTITY: Identity = { cookies: [], userAgent: HEADERS["User-Agent"] };
 
+/** Fetch for the container site itself (possibly proxied); FlareSolverr calls use `opts.fetch`. */
+function siteFetch(opts: CrawlOptions): typeof fetch {
+  return opts.siteFetch ?? opts.fetch ?? fetch;
+}
+
 /** Merges `name=value` lists; later lists win. */
 function mergeCookies(...lists: string[][]): string[] {
   const byName = new Map<string, string>();
@@ -96,7 +103,7 @@ function mergeCookies(...lists: string[][]): string[] {
 }
 
 async function fetchPage(url: string, opts: CrawlOptions, init: RequestInit = {}, identity = DEFAULT_IDENTITY): Promise<Page> {
-  const doFetch = opts.fetch ?? fetch;
+  const doFetch = siteFetch(opts);
   const res = await doFetch(url, {
     redirect: "follow",
     ...init,
@@ -229,7 +236,7 @@ async function submitPassword(page: Page, password: string, opts: CrawlOptions, 
 async function crawlCrateApi(page: Page, opts: CrawlOptions): Promise<CrawlResult | null> {
   const loader = parseCrateLoader(page.html);
   if (!loader) return null;
-  const res = await (opts.fetch ?? fetch)(new URL(loader.apiPath, page.url), {
+  const res = await siteFetch(opts)(new URL(loader.apiPath, page.url), {
     headers: {
       ...HEADERS,
       Accept: "application/json, */*",
@@ -253,14 +260,52 @@ async function crawlCrateApi(page: Page, opts: CrawlOptions): Promise<CrawlResul
   return { links: items.map((l) => l.url), items, source: "crate-api" };
 }
 
+/** Links plus per-file details from decrypted DLC packages. */
+function dlcResult(packages: DlcPackage[], source: string): CrawlResult {
+  const items = packages.flatMap((p) => p.files).map((f) => ({ url: f.url, ...metaFromFileName(f.name) }));
+  const seen = new Set<string>();
+  const unique = items.filter((i) => !seen.has(i.url) && seen.add(i.url));
+  return { links: unique.map((i) => i.url), items: unique, source };
+}
+
+/**
+ * viewcrate-style pages: the visible list resolves links one by one through an endpoint
+ * that refuses automation, but the site also offers a DLC export for download managers.
+ * We poll that export. Null if the page isn't one of these.
+ */
+async function crawlDlcExport(page: Page, opts: CrawlOptions): Promise<CrawlResult | null> {
+  if (!/data-bootstrap-url=["'][^"']+["']/.test(page.html) || !/data-open-base-url=/.test(page.html)) return null;
+  const id = new URL(page.url).pathname.split("/").filter(Boolean).pop();
+  if (!id || !/^[\w-]+$/.test(id)) return null;
+  const headers = {
+    ...HEADERS,
+    Accept: "application/json",
+    "User-Agent": page.userAgent,
+    Referer: page.url,
+    ...(page.cookies.length ? { Cookie: page.cookies.join("; ") } : {}),
+  };
+  const signal = AbortSignal.any([opts.signal, AbortSignal.timeout(TIMEOUT_MS)]);
+  const res = await siteFetch(opts)(new URL(`/api/dlc_url/${id}`, page.url), { headers, signal });
+  if (res.status === 429) {
+    const seconds = Number(res.headers.get("retry-after")) || 15 * 60;
+    throw new RateLimitError(`Container site rate-limited us (retry in ${seconds}s)`, seconds * 1000);
+  }
+  const meta = (await res.json().catch(() => null)) as { url?: string; detail?: string; error?: string } | null;
+  if (!res.ok || !meta?.url) throw new Error(`Container's DLC export is unavailable${meta?.detail || meta?.error ? `: ${meta.detail ?? meta.error}` : ""}`);
+
+  const file = await siteFetch(opts)(new URL(meta.url, page.url), { headers: { ...headers, Accept: "*/*" }, signal });
+  if (!file.ok) throw new Error(`HTTP ${file.status} downloading the container's DLC export`);
+  return dlcResult(await decryptDlc(await file.text(), { signal: opts.signal, fetch: opts.fetch }), "dlc-export");
+}
+
 /** Downloads the page's DLC file(s) with the page's cookies and decrypts them. */
 async function crawlDlc(page: Page, opts: CrawlOptions): Promise<{ result: CrawlResult | null; error: string | null }> {
   let error: string | null = null;
   for (const url of findDlcUrls(page.html, page.url)) {
     try {
       const file = await fetchPage(url, opts, { headers: { Referer: page.url } }, { cookies: page.cookies, userAgent: page.userAgent });
-      const links = dlcLinks(await decryptDlc(file.html, { signal: opts.signal, fetch: opts.fetch }));
-      if (links.length) return { result: { links, source: "dlc" }, error: null };
+      const result = dlcResult(await decryptDlc(file.html, { signal: opts.signal, fetch: opts.fetch }), "dlc");
+      if (result.links.length) return { result, error: null };
     } catch (err) {
       if (opts.signal.aborted) throw err;
       error = err instanceof Error ? err.message : String(err);
@@ -294,7 +339,7 @@ async function crawlPage(page: Page, opts: CrawlOptions, endpoint: string | null
     }
   }
 
-  const crate = await crawlCrateApi(page, opts);
+  const crate = (await crawlCrateApi(page, opts)) ?? (await crawlDlcExport(page, opts));
   if (crate) return crate;
 
   const { result, dlcError } = await runSources(page, opts);

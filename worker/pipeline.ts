@@ -26,6 +26,7 @@ import {
   type Link,
 } from "@/lib/links";
 import { planMirrors } from "@/lib/mirrors";
+import { fetchFor } from "@/lib/net";
 import { notify } from "@/lib/notify";
 import { renderTemplate, resolveInside } from "@/lib/paths";
 import { getSettings } from "@/lib/settings";
@@ -173,6 +174,7 @@ async function resolveFiles(link: Link, container: Container, signal: AbortSigna
     account: hostAccount(resolver.id),
     password: container.password,
     signal,
+    fetch: fetchFor("host"),
   });
   if (remote.length === 0) throw new HostOfflineError("Link resolved to no files");
   const rows = upsertFiles(

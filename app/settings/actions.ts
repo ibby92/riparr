@@ -15,6 +15,7 @@ import { requireSession, startSession } from "@/lib/session";
 import { ACCOUNT_FIELDS, listHostAccounts, saveHostAccount } from "@/lib/host-accounts";
 import { normalizeTargetDir } from "@/lib/paths";
 import { testFlareSolverr } from "@/lib/crawlers";
+import { maskProxyUrl, proxiedFetch, proxyUrlError, proxyUrlSetting, publicIp, unmaskProxyUrl } from "@/lib/net";
 import { notify } from "@/lib/notify";
 import { KNOWN_HOSTS } from "@/lib/host-ids";
 import { getSettings, NOTIFY_EVENTS, saveSettings, type NotifyEvent } from "@/lib/settings";
@@ -48,6 +49,8 @@ const settingsInput = z.object({
     .trim()
     .refine((v) => v.includes("{filename}") || v.includes("{name}"), "Template must include {filename} or {name}"),
   flaresolverrUrl: optionalUrl,
+  proxyUrl: z.string().trim(),
+  proxyScope: z.enum(["containers", "all"]).default("containers"),
   notifyWebhookUrl: optionalUrl,
   notifyAppriseUrl: optionalUrl,
 });
@@ -57,6 +60,10 @@ export async function saveAppSettings(_prev: SettingsState, formData: FormData):
   const parsed = settingsInput.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { errors: z.flattenError(parsed.error).fieldErrors };
   const { mbPerSecond, ...rest } = parsed.data;
+  // The form shows the proxy password masked; keep the stored one unless it was retyped.
+  rest.proxyUrl = unmaskProxyUrl(rest.proxyUrl, getSettings().proxyUrl);
+  const proxyError = proxyUrlError(rest.proxyUrl);
+  if (proxyError) return { errors: { proxyUrl: [proxyError] } };
   const notifyEvents = formData.getAll("notifyEvents").filter((e): e is NotifyEvent => String(e) in NOTIFY_EVENTS);
   const known: string[] = KNOWN_HOSTS.map((h) => h.id);
   const picked = [...new Set(formData.getAll("hostPriority").map(String))].filter((id) => known.includes(id));
@@ -129,4 +136,17 @@ export async function checkFlareSolverr(): Promise<TestState> {
   if (!url) return { ok: false, result: "No FlareSolverr URL saved" };
   const result = await testFlareSolverr(url);
   return result.ok ? { ok: true, result: `Connected (FlareSolverr ${result.version})` } : { ok: false, result: result.error };
+}
+
+export async function checkProxy(): Promise<TestState> {
+  await requireSession();
+  const url = proxyUrlSetting();
+  if (!url) return { ok: false, result: "No proxy saved" };
+  try {
+    const [direct, viaProxy] = await Promise.all([publicIp(fetch).catch(() => "unknown"), publicIp(proxiedFetch(url))]);
+    if (direct === viaProxy) return { ok: false, result: `Proxy works but your IP is unchanged (${viaProxy}); traffic isn't leaving through a VPN` };
+    return { ok: true, result: `Working: ${maskProxyUrl(url)} exits as ${viaProxy} (direct: ${direct})` };
+  } catch (err) {
+    return { ok: false, result: `Proxy failed: ${err instanceof Error ? (err.cause instanceof Error ? err.cause.message : err.message) : err}` };
+  }
 }

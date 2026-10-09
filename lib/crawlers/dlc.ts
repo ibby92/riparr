@@ -12,7 +12,8 @@ const APP_IV = Buffer.from("9bc24cb995cb8db3");
 const TIMEOUT_MS = 30_000;
 const MAX_DLC_BYTES = 2 * 1024 * 1024;
 
-export type DlcPackage = { name: string; links: string[] };
+export type DlcFile = { url: string; name?: string; size?: string };
+export type DlcPackage = { name: string; links: string[]; files: DlcFile[] };
 
 export class DlcError extends Error {
   name = "DlcError";
@@ -56,10 +57,17 @@ export function parseDlcXml(xml: string): DlcPackage[] {
   const packages: DlcPackage[] = [];
   for (const pkg of content.matchAll(/<package\b([^>]*)>([\s\S]*?)<\/package>/gi)) {
     const nameAttr = /\bname\s*=\s*"([^"]*)"/i.exec(pkg[1])?.[1] ?? "";
-    const links = [...pkg[2].matchAll(/<url>\s*([^<]*?)\s*<\/url>/gi)]
-      .map((m) => b64(m[1]).toString("utf8").trim())
-      .filter((u) => /^https?:\/\/\S+$/i.test(u));
-    packages.push({ name: b64(nameAttr).toString("utf8").trim(), links });
+    const files: DlcFile[] = [];
+    for (const file of pkg[2].matchAll(/<file\b[^>]*>([\s\S]*?)<\/file>/gi)) {
+      const field = (tag: string) => {
+        const raw = new RegExp(`<${tag}>\\s*([^<]*?)\\s*</${tag}>`, "i").exec(file[1])?.[1];
+        return raw ? b64(raw).toString("utf8").trim() || undefined : undefined;
+      };
+      const url = field("url");
+      if (!url || !/^https?:\/\/\S+$/i.test(url)) continue;
+      files.push({ url, name: field("filename"), size: field("size") });
+    }
+    packages.push({ name: b64(nameAttr).toString("utf8").trim(), links: files.map((f) => f.url), files });
   }
   return packages;
 }
@@ -90,4 +98,20 @@ export async function decryptDlc(
 /** All links across packages, deduplicated in order. */
 export function dlcLinks(packages: DlcPackage[]): string[] {
   return [...new Set(packages.flatMap((p) => p.links))];
+}
+
+/**
+ * Splits a release file name like "Show.S01E02.NF.x264.1080p.mkv 665.21 MB" into
+ * label, episode, quality and size (as containers often append the size).
+ */
+export function metaFromFileName(raw: string | undefined): { label?: string; episode?: string; quality?: string; size?: string } {
+  if (!raw) return {};
+  const sizeMatch = /\s+(\d+(?:\.\d+)?\s*(?:[KMGT]i?B))\s*$/i.exec(raw);
+  const label = (sizeMatch ? raw.slice(0, sizeMatch.index) : raw).trim() || undefined;
+  return {
+    label,
+    episode: /\b(S\d{1,3}E\d{1,4})\b/i.exec(raw)?.[1]?.toUpperCase(),
+    quality: /\b(\d{3,4}p|4k|2160p)\b/i.exec(raw)?.[1]?.toLowerCase(),
+    size: sizeMatch?.[1],
+  };
 }

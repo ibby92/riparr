@@ -70,7 +70,11 @@ The default `{dir}/{filename}` keeps a remote folder's structure and collapses t
 
 Every poll re-reads the page as it is now and queues only links it hasn't seen before. New episodes or files added to a container are picked up on the next check. Links are read in this order:
 
-1. **Script-loaded link lists**, as on mkvdrama.net. The page fetches an encrypted list with JavaScript. Riparr does the same without a browser, and keeps each link's release name, episode, quality and size. These sites rate-limit repeat visits, so Riparr waits as long as the site asks.
+1. **Site exports.** Pages that load their list with JavaScript are read the way the page does it:
+   - **mkvdrama-style:** an encrypted link list.
+   - **viewcrate-style:** the site's DLC export for download managers. Its visible list resolves links one at a time through an endpoint that refuses automated access, so Riparr doesn't use that.
+
+   Either way Riparr keeps each link's release name, episode, quality and size. These sites rate-limit repeat visits, so Riparr waits as long as the site asks.
 2. **Click'n'Load data** embedded in the page.
 3. **The page's `.dlc` file.**
 4. **Plain host links** in the HTML.
@@ -126,6 +130,29 @@ Saved credentials are stored unencrypted in the database under `/config`.
 ### Archives
 
 After a container's downloads settle, Riparr extracts finished archives in place. It tries no password, then the container's password, then any password that arrived with Click'n'Load. A set that's still missing parts waits for them. A set that needs a password shows up under **Archives** on the container page; set the password on the container and the archive is retried. Deleting the archives after extraction is optional (**Settings → Archives**).
+
+### VPN or proxy for blocked container sites
+
+Some networks block particular container sites, for example by filtering on the site name. Riparr can send its requests to container sites through a proxy, set in **Settings → Integrations → Proxy** or with `RIPARR_PROXY_URL`. Supported proxies:
+- `http://host:port`, such as gluetun's built-in proxy;
+- `socks5://user:pass@host:port`, such as a VPN provider's SOCKS5 server.
+
+The proxy covers **container sites only** by default, so large downloads stay on your own connection. Switch the scope to **Everything** to route host APIs and downloads too (MEGA excepted). **Test proxy** compares your public IP with and without the proxy.
+
+**Already running gluetun** with `HTTPPROXY=on`: join Riparr to its network.
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.existing-gluetun.yml up -d
+```
+
+The override assumes the container is named `gluetun` and the network is `vpn_proxy`; set `GLUETUN_NETWORK` if yours differs.
+
+**No gluetun yet:** `docker-compose.vpn.yml` starts one for NordVPN, and any provider gluetun supports works too. Put your NordVPN *service credentials*, not your account login, in `.env` (see `.env.example`):
+
+```sh
+cp .env.example .env   # fill in NORDVPN_USER / NORDVPN_PASSWORD
+docker compose -f docker-compose.yml -f docker-compose.vpn.yml up -d
+```
 
 ### FlareSolverr
 

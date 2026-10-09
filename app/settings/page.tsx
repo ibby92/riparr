@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 import { apiKey, authMode, currentUsername } from "@/lib/auth";
 import { ACCOUNT_FIELDS, listHostAccounts } from "@/lib/host-accounts";
+import { maskProxyUrl } from "@/lib/net";
 import { getSettings } from "@/lib/settings";
 import { logout } from "../auth-actions";
 import { newApiKey, saveAccount, setAuthentication } from "./actions";
@@ -30,7 +31,11 @@ async function Settings() {
   const envOverride = process.env.RIPARR_AUTH === "none";
   return (
     <>
-      <SettingsForm settings={getSettings()} />
+      {/* The proxy password never reaches the browser. */}
+      <SettingsForm
+        settings={{ ...getSettings(), proxyUrl: maskProxyUrl(getSettings().proxyUrl) }}
+        envProxy={Boolean(process.env.RIPARR_PROXY_URL)}
+      />
       <IntegrationTests />
 
       <section className="card space-y-5 p-5">

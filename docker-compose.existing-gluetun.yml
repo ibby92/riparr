@@ -1,0 +1,19 @@
+# Use a gluetun you already run (with HTTPPROXY=on) instead of starting a new one.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.existing-gluetun.yml up -d
+#
+# GLUETUN_NETWORK is the Docker network your gluetun container is on (default: vpn_proxy),
+# and the container must be named "gluetun" (or change the proxy URL below).
+services:
+  riparr:
+    environment:
+      # Used unless a proxy is set in Settings → Integrations.
+      - RIPARR_PROXY_URL=http://gluetun:8888
+    networks:
+      - default
+      - gluetun
+
+networks:
+  gluetun:
+    name: ${GLUETUN_NETWORK:-vpn_proxy}
+    external: true
