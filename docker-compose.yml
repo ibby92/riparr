@@ -1,0 +1,18 @@
+services:
+  riparr:
+    build: .
+    image: riparr:latest
+    container_name: riparr
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=002
+      - TZ=Etc/UTC
+    volumes:
+      - ./config:/config
+      # Point this at the same media root your *arr apps use.
+      - /path/to/media:/downloads
+    ports:
+      - "7676:7676"
+      - "9666:9666"
