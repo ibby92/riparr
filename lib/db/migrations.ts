@@ -92,6 +92,10 @@ const MIGRATIONS: string[] = [
   ALTER TABLE files ADD COLUMN dir TEXT NOT NULL DEFAULT '';
   CREATE UNIQUE INDEX files_link_key ON files(link_id, key);
   `,
+  // Containers fed only by Click'n'Load (e.g. captcha-protected pages) aren't polled.
+  `
+  ALTER TABLE containers ADD COLUMN poll INTEGER NOT NULL DEFAULT 1;
+  `,
 ];
 
 export function migrate(db: DatabaseSync) {

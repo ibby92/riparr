@@ -11,6 +11,8 @@ export type Container = {
   password: string | null;
   poll_interval_min: number;
   enabled: number;
+  /** 0 = never fetch the page; links arrive only via Click'n'Load. */
+  poll: number;
   target_dir: string;
   path_template: string;
   status: ContainerStatus;
@@ -54,6 +56,7 @@ export const containerInput = z.object({
     .min(1, "Template is required")
     .refine((v) => v.includes("{filename}") || v.includes("{name}"), "Template must include {filename} or {name}"),
   enabled: z.preprocess((v) => v === "on" || v === true, z.boolean()),
+  poll: z.preprocess((v) => v === "on" || v === true, z.boolean()),
 });
 
 export type ContainerInput = z.infer<typeof containerInput>;
@@ -78,13 +81,14 @@ export function findContainerByUrl(url: string): Container | undefined {
 
 export function createContainer(input: ContainerInput): number {
   const result = run(
-    `INSERT INTO containers (name, url, password, poll_interval_min, enabled, target_dir, path_template, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO containers (name, url, password, poll_interval_min, enabled, poll, target_dir, path_template, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     input.name,
     input.url,
     input.password,
     input.poll_interval_min,
     input.enabled ? 1 : 0,
+    input.poll ? 1 : 0,
     input.target_dir,
     input.path_template,
     Date.now(),
@@ -95,13 +99,14 @@ export function createContainer(input: ContainerInput): number {
 export function updateContainer(id: number, input: ContainerInput) {
   run(
     `UPDATE containers
-        SET name = ?, url = ?, password = ?, poll_interval_min = ?, enabled = ?, target_dir = ?, path_template = ?
+        SET name = ?, url = ?, password = ?, poll_interval_min = ?, enabled = ?, poll = ?, target_dir = ?, path_template = ?
       WHERE id = ?`,
     input.name,
     input.url,
     input.password,
     input.poll_interval_min,
     input.enabled ? 1 : 0,
+    input.poll ? 1 : 0,
     input.target_dir,
     input.path_template,
     id,
@@ -116,10 +121,10 @@ export function setContainerEnabled(id: number, enabled: boolean) {
   run("UPDATE containers SET enabled = ? WHERE id = ?", enabled ? 1 : 0, id);
 }
 
-/** Enabled containers whose next check is due, oldest first. */
+/** Enabled, polled containers whose next check is due, oldest first. */
 export function dueContainers(now = Date.now()): Container[] {
   return all<Container>(
-    "SELECT * FROM containers WHERE enabled = 1 AND next_check_at <= ? ORDER BY next_check_at",
+    "SELECT * FROM containers WHERE enabled = 1 AND poll = 1 AND next_check_at <= ? ORDER BY next_check_at",
     now,
   );
 }

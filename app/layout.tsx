@@ -22,6 +22,7 @@ const NAV = [
   { href: "/", label: "Dashboard" },
   { href: "/containers", label: "Containers" },
   { href: "/queue", label: "Queue" },
+  { href: "/settings", label: "Settings" },
 ] as const;
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

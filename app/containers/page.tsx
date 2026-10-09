@@ -68,13 +68,13 @@ async function ContainerTable() {
               </td>
               <td className="px-4 py-2 text-muted">{formatAgo(c.last_checked_at, now)}</td>
               <td className="px-4 py-2 text-muted">
-                {c.enabled ? (c.next_check_at <= now ? "due" : formatAgo(c.next_check_at, now)) : "—"}
+                {!c.enabled ? "—" : !c.poll ? "Click'n'Load only" : c.next_check_at <= now ? "due" : formatAgo(c.next_check_at, now)}
               </td>
               <td className="px-4 py-2">
                 <div className="flex justify-end gap-2">
                   <form action={checkNow}>
                     <input type="hidden" name="id" value={c.id} />
-                    <button className="btn" disabled={!c.enabled}>
+                    <button className="btn" disabled={!c.enabled || !c.poll}>
                       Check now
                     </button>
                   </form>

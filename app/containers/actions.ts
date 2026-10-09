@@ -54,7 +54,7 @@ export async function saveContainer(_prev: FormState, formData: FormData): Promi
     savedId = id;
   } else {
     savedId = createContainer(parsed.data);
-    if (parsed.data.enabled) sendCommand({ type: "check_now", containerId: savedId });
+    if (parsed.data.enabled && parsed.data.poll) sendCommand({ type: "check_now", containerId: savedId });
   }
   redirect(`/containers/${savedId}`);
 }

@@ -1,12 +1,13 @@
 import path from "node:path";
 import PQueue from "p-queue";
 import { getContainer, type Container } from "@/lib/containers";
-import { downloadsRoot, one } from "@/lib/db";
+import { downloadsRoot } from "@/lib/db";
 import { downloadFile } from "@/lib/download";
 import { HostOfflineError, NeedsAttentionError, RateLimitError } from "@/lib/errors";
 import { logEvent } from "@/lib/events";
+import { hostAccount } from "@/lib/host-accounts";
 import { findResolver } from "@/lib/hosts";
-import type { HostAccount, RemoteFile } from "@/lib/hosts/types";
+import type { RemoteFile } from "@/lib/hosts/types";
 import {
   claimableLinks,
   getLink,
@@ -16,7 +17,7 @@ import {
   type Link,
 } from "@/lib/links";
 import { renderTemplate, resolveInside } from "@/lib/paths";
-import { getSetting } from "@/lib/settings";
+import { getSettings } from "@/lib/settings";
 
 const MINUTE = 60_000;
 const MAX_ATTEMPTS = 5;
@@ -29,27 +30,22 @@ const jobs = new Map<number, Job>();
 const hostQueues = new Map<string, PQueue>();
 let globalQueue: PQueue | undefined;
 
-function intSetting(key: string, fallback: number) {
-  const v = Number(getSetting(key));
-  return Number.isInteger(v) && v > 0 ? v : fallback;
-}
-
 function queues(host: string) {
-  globalQueue ??= new PQueue({ concurrency: intSetting("downloads.concurrency", 3) });
+  const settings = getSettings();
+  globalQueue ??= new PQueue({ concurrency: settings.concurrency });
   let hostQueue = hostQueues.get(host);
   if (!hostQueue) {
-    hostQueue = new PQueue({ concurrency: intSetting("downloads.per_host", 2) });
+    hostQueue = new PQueue({ concurrency: settings.perHost });
     hostQueues.set(host, hostQueue);
   }
   return { globalQueue, hostQueue };
 }
 
-function hostAccount(host: string): HostAccount | null {
-  const row = one<{ credentials: string }>(
-    "SELECT credentials FROM host_accounts WHERE host = ? AND enabled = 1",
-    host,
-  );
-  return row ? (JSON.parse(row.credentials) as HostAccount) : null;
+/** Applies concurrency changes from the settings page to running queues. */
+function applyConcurrency() {
+  const { concurrency, perHost } = getSettings();
+  if (globalQueue && globalQueue.concurrency !== concurrency) globalQueue.concurrency = concurrency;
+  for (const q of hostQueues.values()) if (q.concurrency !== perHost) q.concurrency = perHost;
 }
 
 /** Retry delay after the nth consecutive failure: 1m, 2m, 4m, … capped at 6h. */
@@ -59,6 +55,7 @@ export function retryDelay(attempts: number) {
 
 /** Queues every claimable link that isn't already in flight. */
 export function scheduleDownloads(shutdown: AbortSignal) {
+  applyConcurrency();
   for (const link of claimableLinks()) {
     if (jobs.has(link.id) || shutdown.aborted) continue;
     const controller = new AbortController();
@@ -155,7 +152,7 @@ async function downloadOne(container: Container, link: Link, fileId: number, fil
       finalPath,
       partialPath,
       signal,
-      bytesPerSecond: intSetting("downloads.bytes_per_second", 0) || null,
+      bytesPerSecond: getSettings().bytesPerSecond || null,
       onProgress: (bytes) => {
         const now = Date.now();
         if (now - lastWrite < PROGRESS_WRITE_MS) return;

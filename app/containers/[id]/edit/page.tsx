@@ -21,10 +21,10 @@ async function EditForm({ params }: { params: Promise<{ id: string }> }) {
   const container = getContainer(Number((await params).id));
   if (!container) notFound();
 
-  const { id, name, url, password, poll_interval_min, enabled, target_dir, path_template } = container;
+  const { id, name, url, password, poll_interval_min, enabled, poll, target_dir, path_template } = container;
   return (
     <>
-      <ContainerForm container={{ id, name, url, password, poll_interval_min, enabled, target_dir, path_template }} />
+      <ContainerForm container={{ id, name, url, password, poll_interval_min, enabled, poll, target_dir, path_template }} />
       <form action={removeContainer} className="card max-w-2xl space-y-3 border-red-500/40 p-5">
         <input type="hidden" name="id" value={id} />
         <p className="text-sm text-muted">

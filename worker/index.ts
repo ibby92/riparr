@@ -3,7 +3,8 @@ import { pruneCommands, takeCommands, type Command } from "@/lib/commands";
 import { getContainer, scheduleCheckNow } from "@/lib/containers";
 import { recoverInterrupted } from "@/lib/links";
 import { logEvent, pruneEvents } from "@/lib/events";
-import { HEARTBEAT_INTERVAL_MS, writeHeartbeat } from "@/lib/settings";
+import { getSettings, HEARTBEAT_INTERVAL_MS, writeHeartbeat } from "@/lib/settings";
+import { startCnlServer } from "./cnl-server";
 import { cancelContainer, cancelLink, scheduleDownloads } from "./pipeline";
 import { runDueChecks } from "./scheduler";
 
@@ -36,7 +37,21 @@ function tick() {
   scheduleDownloads(shutdown.signal);
 }
 
-function main() {
+async function startClickNLoad() {
+  if (!getSettings().cnlEnabled) return null;
+  const port = Number(process.env.RIPARR_CNL_PORT ?? 9666);
+  try {
+    const server = await startCnlServer(port);
+    console.log(`[riparr] click'n'load listening on :${port}`);
+    return server;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logEvent("error", `Click'n'Load listener could not start on port ${port}: ${message}`);
+    return null;
+  }
+}
+
+async function main() {
   getDb(); // open and migrate before anything else
   recoverInterrupted();
   writeHeartbeat();
@@ -58,10 +73,12 @@ function main() {
     }, 60 * 60 * 1000),
   ];
   tick();
+  const cnl = await startClickNLoad();
 
   const stop = (signal: string) => {
     console.log(`[riparr] ${signal} received, stopping worker`);
     timers.forEach(clearInterval);
+    cnl?.close();
     shutdown.abort();
     logEvent("info", "Worker stopped");
     closeDb();
@@ -71,4 +88,4 @@ function main() {
   process.once("SIGINT", () => stop("SIGINT"));
 }
 
-main();
+void main();

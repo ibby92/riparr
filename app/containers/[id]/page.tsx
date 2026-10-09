@@ -31,9 +31,9 @@ async function ContainerDetail({ params }: { params: Promise<{ id: string }> }) 
   const rows: [string, React.ReactNode][] = [
     ["URL", <a key="url" href={container.url} target="_blank" rel="noreferrer" className="break-all hover:text-accent">{container.url}</a>],
     ["Saves to", <code key="dir">{`/downloads/${container.target_dir ? container.target_dir + "/" : ""}${container.path_template}`}</code>],
-    ["Poll interval", `${container.poll_interval_min} min`],
+    ["Poll interval", container.poll ? `${container.poll_interval_min} min` : "not polled (Click'n'Load only)"],
     ["Last check", formatAgo(container.last_checked_at, now)],
-    ["Next check", container.enabled ? (container.next_check_at <= now ? "due" : formatAgo(container.next_check_at, now)) : "paused"],
+    ["Next check", !container.enabled ? "paused" : !container.poll ? "—" : container.next_check_at <= now ? "due" : formatAgo(container.next_check_at, now)],
     ["Last new content", formatAgo(container.last_changed_at, now)],
     ["Links", `${container.done_count} downloaded / ${container.link_count} found`],
   ];
@@ -47,7 +47,7 @@ async function ContainerDetail({ params }: { params: Promise<{ id: string }> }) 
         <div className="ml-auto flex gap-2">
           <form action={checkNow}>
             <input type="hidden" name="id" value={container.id} />
-            <button className="btn" disabled={!container.enabled}>Check now</button>
+            <button className="btn" disabled={!container.enabled || !container.poll}>Check now</button>
           </form>
           <form action={toggleContainer}>
             <input type="hidden" name="id" value={container.id} />

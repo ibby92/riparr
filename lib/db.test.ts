@@ -36,6 +36,7 @@ const form = {
   target_dir: "tv/Show/",
   path_template: "{filename}",
   enabled: "on",
+  poll: "on",
 };
 
 describe("containerInput", () => {
@@ -48,6 +49,7 @@ describe("containerInput", () => {
       target_dir: "tv/Show",
       path_template: "{filename}",
       enabled: true,
+      poll: true,
     });
   });
 
@@ -71,7 +73,7 @@ describe("containerInput", () => {
 describe("database", () => {
   it("migrations are idempotent", () => {
     migrate(getDb());
-    expect(getDb().prepare("PRAGMA user_version").get()).toEqual({ user_version: 2 });
+    expect(getDb().prepare("PRAGMA user_version").get()).toEqual({ user_version: 3 });
   });
 
   it("creates containers that are immediately due", () => {

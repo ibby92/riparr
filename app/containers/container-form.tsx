@@ -8,7 +8,7 @@ import { saveContainer, type FormState } from "./actions";
 type Props = {
   container?: Pick<
     Container,
-    "id" | "name" | "url" | "password" | "poll_interval_min" | "enabled" | "target_dir" | "path_template"
+    "id" | "name" | "url" | "password" | "poll_interval_min" | "enabled" | "poll" | "target_dir" | "path_template"
   >;
 };
 
@@ -99,7 +99,16 @@ export function ContainerForm({ container }: Props) {
 
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" name="enabled" defaultChecked={v ? v.enabled === "on" : container ? container.enabled === 1 : true} />
-        Watch this container
+        Enabled: download new links from this container
+      </label>
+      <label className="flex items-start gap-2 text-sm">
+        <input type="checkbox" name="poll" className="mt-1" defaultChecked={v ? v.poll === "on" : container ? container.poll === 1 : true} />
+        <span>
+          Poll the page for new links
+          <span className="block text-xs text-muted">
+            Turn off for captcha-protected pages: solve the captcha in your browser and send links with Click&apos;n&apos;Load instead.
+          </span>
+        </span>
       </label>
 
       {state.message && <p className="text-sm text-red-500">{state.message}</p>}

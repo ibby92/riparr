@@ -127,6 +127,7 @@ describe("pipeline", () => {
         target_dir: "tv",
         path_template: "{container}/{dir}/{filename}",
         enabled: "on",
+        poll: "on",
       }),
     );
 
