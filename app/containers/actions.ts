@@ -14,7 +14,8 @@ import {
   setContainerEnabled,
   updateContainer,
 } from "@/lib/containers";
-import { getLink, requeueLink, setLinkStatus } from "@/lib/links";
+import { logEvent } from "@/lib/events";
+import { addLinks, getLink, requeueLink, setLinkStatus } from "@/lib/links";
 
 export type FormState = {
   errors?: Record<string, string[] | undefined>;
@@ -97,5 +98,33 @@ export async function ignoreLink(formData: FormData) {
 export async function checkNow(formData: FormData) {
   await requireSession();
   sendCommand({ type: "check_now", containerId: parseId(formData.get("id")) });
+  refresh();
+}
+
+export type AddLinksState = { message?: string; error?: string };
+
+export async function addLinksManually(_prev: AddLinksState, formData: FormData): Promise<AddLinksState> {
+  await requireSession();
+  const container = getContainer(parseId(formData.get("id")));
+  if (!container) return { error: "Container no longer exists" };
+
+  const tokens = String(formData.get("urls") ?? "").split(/\s+/).filter(Boolean);
+  const urls = tokens.filter((t) => /^https?:\/\/\S+$/i.test(t));
+  if (urls.length === 0) return { error: "Paste at least one http(s) link" };
+  if (urls.length > 500) return { error: "At most 500 links at a time" };
+
+  const password = String(formData.get("archive_password") ?? "").trim() || null;
+  const added = addLinks(container.id, urls, password);
+  logEvent("info", `Added ${added} of ${urls.length} link(s) by hand`, container.id);
+  refresh();
+  const skipped = tokens.length - urls.length;
+  return {
+    message: `Added ${added} new link(s)${urls.length > added ? `, ${urls.length - added} already known` : ""}${skipped ? `, ignored ${skipped} non-link(s)` : ""}`,
+  };
+}
+
+export async function retryExtractions(formData: FormData) {
+  await requireSession();
+  sendCommand({ type: "extract_container", containerId: parseId(formData.get("id")) });
   refresh();
 }

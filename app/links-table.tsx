@@ -14,6 +14,13 @@ export function formatBytes(n: number | null): string {
   return `${n.toFixed(i === 0 || n >= 100 ? 0 : 1)} ${units[i]}`;
 }
 
+export function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+}
+
 const STATUS_STYLES: Record<LinkStatus, string> = {
   new: "text-muted",
   queued: "text-muted",
@@ -86,6 +93,12 @@ export function LinksTable({
                       <div className="mt-1 text-xs tabular-nums text-muted">
                         {formatBytes(l.bytes_done)} / {formatBytes(l.bytes_total)}
                         {l.file_count > 1 && ` · ${l.files_done}/${l.file_count} files`}
+                        {l.status === "downloading" && l.speed_bps > 0 && (
+                          <>
+                            {` · ${formatBytes(l.speed_bps)}/s`}
+                            {l.bytes_total !== null && ` · ${formatDuration((l.bytes_total - l.bytes_done) / l.speed_bps)} left`}
+                          </>
+                        )}
                       </div>
                     </>
                   )}

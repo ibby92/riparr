@@ -112,6 +112,10 @@ const MIGRATIONS: string[] = [
     updated_at   INTEGER NOT NULL
   );
   `,
+  // Live transfer speed for the queue (bytes/second, refreshed with progress).
+  `
+  ALTER TABLE files ADD COLUMN speed_bps INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export function migrate(db: DatabaseSync) {

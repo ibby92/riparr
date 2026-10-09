@@ -21,6 +21,8 @@ export type Link = {
 
 export type LinkWithProgress = Link & {
   container_name: string;
+  /** Combined speed of the link's files that are downloading right now. */
+  speed_bps: number;
   file_count: number;
   files_done: number;
   bytes_done: number;
@@ -41,6 +43,7 @@ export type FileRow = {
   attempts: number;
   error: string | null;
   updated_at: number;
+  speed_bps: number;
 };
 
 /**
@@ -75,6 +78,7 @@ const WITH_PROGRESS = `
          COUNT(f.id) AS file_count,
          COALESCE(SUM(f.status IN ('done', 'skipped')), 0) AS files_done,
          COALESCE(SUM(f.bytes_done), 0) AS bytes_done,
+         COALESCE(SUM(CASE WHEN f.status = 'downloading' THEN f.speed_bps ELSE 0 END), 0) AS speed_bps,
          CASE WHEN COUNT(f.id) = 0 OR COUNT(f.size) < COUNT(f.id) THEN NULL ELSE SUM(f.size) END AS bytes_total
     FROM links l
     JOIN containers c ON c.id = l.container_id
@@ -113,6 +117,11 @@ export function getLink(id: number): Link | undefined {
 
 export function listFiles(linkId: number): FileRow[] {
   return all<FileRow>("SELECT * FROM files WHERE link_id = ? ORDER BY dir, remote_name", linkId);
+}
+
+/** Combined speed of everything downloading right now (bytes/second). */
+export function totalSpeed(): number {
+  return one<{ s: number }>("SELECT COALESCE(SUM(speed_bps), 0) AS s FROM files WHERE status = 'downloading'")?.s ?? 0;
 }
 
 /** Links of a container that are still waiting or in flight. */
@@ -199,7 +208,7 @@ export function upsertFiles(
 
 export function updateFile(
   id: number,
-  patch: Partial<Pick<FileRow, "status" | "bytes_done" | "local_path" | "error" | "attempts">>,
+  patch: Partial<Pick<FileRow, "status" | "bytes_done" | "local_path" | "error" | "attempts" | "speed_bps">>,
 ) {
   const keys = Object.keys(patch) as (keyof typeof patch)[];
   if (keys.length === 0) return;
@@ -208,5 +217,21 @@ export function updateFile(
     ...keys.map((k) => patch[k] ?? null),
     Date.now(),
     id,
+  );
+}
+
+export type ExtractionRow = {
+  id: number;
+  entry_path: string;
+  status: "extracted" | "incomplete" | "wrong_password" | "failed";
+  error: string | null;
+  files: number;
+  updated_at: number;
+};
+
+export function listExtractions(containerId: number): ExtractionRow[] {
+  return all<ExtractionRow>(
+    "SELECT id, entry_path, status, error, files, updated_at FROM extractions WHERE container_id = ? ORDER BY updated_at DESC",
+    containerId,
   );
 }

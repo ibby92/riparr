@@ -30,6 +30,7 @@ const settingsInput = z.object({
   concurrency: z.coerce.number<string>().int().min(1).max(20),
   perHost: z.coerce.number<string>().int().min(1).max(10),
   mbPerSecond: z.coerce.number<string>().min(0, "Use 0 for unlimited").max(10_000),
+  minFreeGb: z.coerce.number<string>().min(0, "Use 0 to turn off").max(100_000),
   cnlEnabled: z.preprocess((v) => v === "on", z.boolean()),
   extractEnabled: z.preprocess((v) => v === "on", z.boolean()),
   extractDeleteArchives: z.preprocess((v) => v === "on", z.boolean()),

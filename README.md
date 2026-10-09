@@ -1,36 +1,160 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Riparr
 
-## Getting Started
+Hands-off downloads for your *arr stack. Point Riparr at a **container** (a link-protector or paste page that lists file-host links) and it keeps watching it: when new links appear, Riparr downloads them from the host, verifies them, extracts archives and files everything under the folder and naming scheme you chose.
 
-First, run the development server:
+- **Containers:** Click'n'Load (CNL2) pages, plain paste pages (rentry, pastebin, …), and links pushed from your browser's Click'n'Load button
+- **Hosts:** pixeldrain, gofile and MEGA, including folders and passwords, with optional accounts
+- **Downloads:** resume after restarts, size and checksum checks, per-host limits, speed limit, low-disk guard
+- **Archives:** zip, 7z and RAR/RAR5, including multi-part sets and passwords
+- **Extras:** FlareSolverr for Cloudflare-protected pages, webhook/Discord/Apprise notifications, REST API, single-user login
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Quick start (Docker)
+
+```yaml
+services:
+  riparr:
+    image: riparr:latest
+    build: .
+    container_name: riparr
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - UMASK=002
+      - TZ=Etc/UTC
+    volumes:
+      - ./config:/config
+      - /path/to/media:/downloads   # the same media root your *arr apps use
+    ports:
+      - "7676:7676"   # web UI
+      - "9666:9666"   # Click'n'Load listener
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+```sh
+docker compose up -d --build
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Open `http://<host>:7676` and create your login. (Port 7878 is Radarr's, so Riparr uses 7676.)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PUID` / `PGID` | `1000` | Owner of downloaded files and `/config` |
+| `UMASK` | `002` | File creation mask |
+| `RIPARR_AUTH` | (unset) | `none` disables login; use it to recover from a forgotten password |
+| `RIPARR_CNL_PORT` | `9666` | Click'n'Load listener port inside the container |
+| `RIPARR_7Z` | (auto) | Path to a 7-Zip binary, if not the bundled `7z` |
 
-## Learn More
+`/config` holds the SQLite database (settings, history, host credentials). Back it up like any other *arr config folder.
 
-To learn more about Next.js, take a look at the following resources:
+## Using it
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Containers
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Under **Containers → Add container**, give it:
 
-## Deploy on Vercel
+- **URL:** the container page
+- **Target directory:** relative to `/downloads`, e.g. `tv/My Show`
+- **Naming template:** where each file goes inside that directory; `/` makes folders
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Token | Value |
+| --- | --- |
+| `{filename}` | file name with extension |
+| `{name}` / `{ext}` | name without extension / extension without the dot |
+| `{dir}` | sub-folder inside a remote folder (empty for single files) |
+| `{container}` | container name |
+| `{host}` | file host, e.g. `pixeldrain` |
+| `{date}` / `{year}` / `{month}` | when the link was found |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The default `{dir}/{filename}` keeps a remote folder's structure and collapses to just the file name for single files. Every path segment is sanitized, and nothing can escape the downloads folder.
+
+**Poll the page** fetches the URL on the interval you set. Untick it for pages Riparr can't read itself (captchas) and feed those via Click'n'Load instead. **Add links by hand** on a container's page accepts pasted host links.
+
+A container whose page shows a captcha, an anti-bot challenge or a password prompt is marked **Needs attention** on the dashboard, with the reason.
+
+### Click'n'Load
+
+Riparr speaks JDownloader's Click'n'Load protocol on port 9666. Click the CNL button on a container page and the links land in Riparr:
+
+- From a page you already watch, they go into that container, with its folder and template.
+- From any other page, Riparr creates a new, non-polled container. Its folder and template come from **Settings → Click'n'Load**.
+- Archive passwords sent along with the links are kept and used for extraction.
+
+This is how captcha-protected containers work: solve the captcha in your browser, then click Click'n'Load.
+
+> **Browser on a different machine?** CNL buttons post to `127.0.0.1:9666`, which is the computer running the browser. Forward that port to the Riparr host, for example `ssh -N -L 9666:localhost:9666 you@homelab`, or use a userscript such as *Click'n'Load Interceptor* that redirects the request.
+
+### Hosts and accounts
+
+| Host | Links | Account (Settings → Host accounts) |
+| --- | --- | --- |
+| pixeldrain | `/u/<id>` files, `/l/<id>` lists | API key (raises limits) |
+| gofile | `/d/<code>` folders, recursive, passwords | premium token (optional) |
+| MEGA | file and folder links, including legacy `#!` forms | none; public links only |
+
+Rate limits are respected: the link waits, and the wait doesn't count as a failed attempt. Removed files are marked **offline**. Other errors are retried 5 times with backoff, then marked **failed**, and you can retry them from the queue.
+
+gofile's API needs a "website token" built from a value that gofile changes every few months. If gofile folders suddenly fail with an auth error, update **Website token salt** under the gofile account.
+
+Saved credentials are stored unencrypted in the database under `/config`.
+
+### Archives
+
+After a container's downloads settle, Riparr extracts finished archives in place. It tries no password, then the container's password, then any password that arrived with Click'n'Load. A set that's still missing parts waits for them. A set that needs a password shows up under **Archives** on the container page; set the password on the container and the archive is retried. Deleting the archives after extraction is optional (**Settings → Archives**).
+
+### FlareSolverr
+
+If container pages sit behind a Cloudflare or DDoS-Guard challenge, run [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) and set its URL in **Settings → Integrations**:
+
+```yaml
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    restart: unless-stopped
+```
+
+The URL is then `http://flaresolverr:8191`. Riparr reuses the clearance cookies until they expire. FlareSolverr can't solve real captchas (reCAPTCHA, hCaptcha); use Click'n'Load for those.
+
+### Notifications
+
+Under **Settings → Integrations**, set a **webhook URL** (JSON, with Discord webhook URLs detected and formatted) and/or an **Apprise API** endpoint such as `http://apprise:8000/notify/riparr`. Then choose which events send: new links, download finished, download failed, needs attention.
+
+## API
+
+Send the API key from **Settings → Security** as an `X-Api-Key` header or an `?apikey=` query parameter.
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/api/v1/status` | Worker state, counts, current speed, free disk space |
+| GET | `/api/v1/containers` | All containers (passwords are never returned) |
+| POST | `/api/v1/containers` | Create: `{name, url, target_dir, path_template?, password?, poll_interval_min?, enabled?, poll?}` |
+| GET | `/api/v1/containers/{id}` | One container with its links |
+| DELETE | `/api/v1/containers/{id}` | Stop watching (downloaded files are kept) |
+| POST | `/api/v1/containers/{id}/check` | Poll now |
+| POST | `/api/v1/containers/{id}/links` | Add links by hand: `{urls: [...]}` |
+| GET | `/api/v1/queue` | Active and recently finished links |
+| POST | `/api/v1/links/{id}/retry` | Retry a link |
+| POST | `/api/v1/links/{id}/ignore` | Ignore (and cancel) a link |
+| GET | `/api/health` | Unauthenticated liveness check (used by the Docker healthcheck) |
+
+```sh
+curl -H "X-Api-Key: $KEY" http://homelab:7676/api/v1/status
+```
+
+## Development
+
+Requires Node 24 (Riparr uses the built-in `node:sqlite`).
+
+```sh
+npm install
+npm run dev        # Next dev server + worker (watch mode); data in ./config and ./downloads
+npm test           # vitest; 7-Zip tests run when a 7z binary is installed
+npm run typecheck
+npm run lint
+npm run build      # Next standalone build + bundled worker (dist/worker.mjs)
+```
+
+Riparr runs as two processes that share one SQLite database:
+
+- **Web** (`app/`, Next.js): the UI, Server Actions, the REST API, and `proxy.ts` for auth.
+- **Worker** (`worker/`): polls containers, runs the download pipeline, extracts archives and serves Click'n'Load.
+
+The UI talks to the worker through a `commands` table. Shared code lives in `lib/`: crawlers, host resolvers, the downloader, path templates and data access.

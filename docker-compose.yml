@@ -16,3 +16,10 @@ services:
     ports:
       - "7676:7676"
       - "9666:9666"
+
+  # Optional: for container pages behind a Cloudflare challenge.
+  # Then set http://flaresolverr:8191 in Settings → Integrations.
+  # flaresolverr:
+  #   image: ghcr.io/flaresolverr/flaresolverr:latest
+  #   container_name: flaresolverr
+  #   restart: unless-stopped

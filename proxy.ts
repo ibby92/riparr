@@ -5,7 +5,7 @@ const PUBLIC_PAGES = ["/login", "/setup"];
 
 export function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
-  if (authMode() === "none") return NextResponse.next();
+  if (authMode() === "none" || pathname === "/api/health") return NextResponse.next();
 
   const sessionUser = verifySessionToken(req.cookies.get(SESSION_COOKIE)?.value);
 

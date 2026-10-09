@@ -35,6 +35,8 @@ export type AppSettings = {
   perHost: number;
   /** Per-download speed cap in bytes/second; 0 = unlimited. */
   bytesPerSecond: number;
+  /** New downloads wait while the downloads volume has less free space than this (GB); 0 = off. */
+  minFreeGb: number;
   cnlEnabled: boolean;
   /** Where Click'n'Load links from unknown pages go, relative to the downloads folder. */
   cnlTargetDir: string;
@@ -57,6 +59,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   concurrency: 3,
   perHost: 2,
   bytesPerSecond: 0,
+  minFreeGb: 5,
   cnlEnabled: true,
   cnlTargetDir: "clicknload",
   cnlTemplate: "{container}/{dir}/{filename}",
@@ -72,6 +75,7 @@ const SETTING_KEYS: Record<keyof AppSettings, string> = {
   concurrency: "downloads.concurrency",
   perHost: "downloads.per_host",
   bytesPerSecond: "downloads.bytes_per_second",
+  minFreeGb: "downloads.min_free_gb",
   cnlEnabled: "cnl.enabled",
   cnlTargetDir: "cnl.target_dir",
   cnlTemplate: "cnl.template",
@@ -96,4 +100,18 @@ export function saveSettings(settings: Partial<AppSettings>) {
   for (const [key, value] of Object.entries(settings) as [keyof AppSettings, unknown][]) {
     if (value !== undefined) setSetting(SETTING_KEYS[key], JSON.stringify(value));
   }
+}
+
+const DISK_KEY = "worker.disk";
+
+export type DiskStatus = { freeBytes: number; totalBytes: number; low: boolean; checkedAt: number };
+
+/** Written by the worker; read by the dashboard and API. */
+export function writeDiskStatus(status: DiskStatus) {
+  setSetting(DISK_KEY, JSON.stringify(status));
+}
+
+export function readDiskStatus(): DiskStatus | null {
+  const raw = getSetting(DISK_KEY);
+  return raw ? (JSON.parse(raw) as DiskStatus) : null;
 }

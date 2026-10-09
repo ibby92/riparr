@@ -75,6 +75,8 @@ const server = http.createServer((req, res) => {
 });
 
 beforeAll(async () => {
+  // Don't let a nearly full test machine pause the pipeline.
+  (await import("@/lib/settings")).saveSettings({ minFreeGb: 0 });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   RESOLVERS.push({

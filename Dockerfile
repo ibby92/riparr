@@ -32,4 +32,6 @@ COPY docker/entrypoint.sh /entrypoint.sh
 VOLUME ["/config", "/downloads"]
 # 7676: web UI. 9666: Click'n'Load listener (Phase 3).
 EXPOSE 7676 9666
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:' + (process.env.PORT || 7676) + '/api/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
 ENTRYPOINT ["tini", "--", "/entrypoint.sh"]

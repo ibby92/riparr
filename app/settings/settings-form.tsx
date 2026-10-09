@@ -29,7 +29,7 @@ export function SettingsForm({ settings }: { settings: AppSettings }) {
     <form action={action} className="card space-y-6 p-5">
       <fieldset className="space-y-4">
         <legend className="mb-2 font-medium">Downloads</legend>
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Field label="Simultaneous downloads" errors={errors.concurrency}>
             <input name="concurrency" type="number" min={1} max={20} className="input" defaultValue={settings.concurrency} />
           </Field>
@@ -38,6 +38,9 @@ export function SettingsForm({ settings }: { settings: AppSettings }) {
           </Field>
           <Field label="Speed limit per download (MB/s)" hint="0 = unlimited" errors={errors.mbPerSecond}>
             <input name="mbPerSecond" type="number" min={0} step="0.1" className="input" defaultValue={Number(mb.toFixed(2))} />
+          </Field>
+          <Field label="Keep free (GB)" hint="New downloads wait below this; 0 = off" errors={errors.minFreeGb}>
+            <input name="minFreeGb" type="number" min={0} step="1" className="input" defaultValue={settings.minFreeGb} />
           </Field>
         </div>
       </fieldset>

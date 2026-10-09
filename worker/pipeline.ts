@@ -18,6 +18,7 @@ import {
   type Link,
 } from "@/lib/links";
 import { renderTemplate, resolveInside } from "@/lib/paths";
+import { diskIsLow } from "./disk";
 import { linkSettled } from "./extract-runner";
 import { getSettings } from "@/lib/settings";
 
@@ -58,6 +59,8 @@ export function retryDelay(attempts: number) {
 /** Queues every claimable link that isn't already in flight. */
 export function scheduleDownloads(shutdown: AbortSignal) {
   applyConcurrency();
+  // Running downloads finish; nothing new starts until space is freed.
+  if (diskIsLow()) return;
   for (const link of claimableLinks()) {
     if (jobs.has(link.id) || shutdown.aborted) continue;
     const controller = new AbortController();
@@ -151,6 +154,7 @@ async function downloadOne(container: Container, link: Link, fileId: number, fil
 
   updateFile(fileId, { status: "downloading", error: null });
   let lastWrite = 0;
+  let lastBytes: number | null = null;
   try {
     const result = await downloadFile(file, {
       finalPath,
@@ -160,17 +164,21 @@ async function downloadOne(container: Container, link: Link, fileId: number, fil
       onProgress: (bytes) => {
         const now = Date.now();
         if (now - lastWrite < PROGRESS_WRITE_MS) return;
+        // The first sample includes resumed bytes, so speed starts from the second.
+        const speed = lastBytes === null ? 0 : Math.round(((bytes - lastBytes) * 1000) / (now - lastWrite));
         lastWrite = now;
-        updateFile(fileId, { bytes_done: bytes });
+        lastBytes = bytes;
+        updateFile(fileId, { bytes_done: bytes, speed_bps: Math.max(0, speed) });
       },
     });
     updateFile(fileId, {
       status: result.status,
       local_path: path.relative(root, result.path),
+      speed_bps: 0,
       bytes_done: file.size ?? ("bytes" in result ? result.bytes : 0),
     });
   } catch (err) {
-    updateFile(fileId, { status: signal.aborted ? "queued" : "failed", error: errorMessage(err) });
+    updateFile(fileId, { status: signal.aborted ? "queued" : "failed", error: errorMessage(err), speed_bps: 0 });
     throw err;
   }
 }

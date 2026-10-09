@@ -4,11 +4,19 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { getContainer } from "@/lib/containers";
 import { recentEvents } from "@/lib/events";
-import { listLinks } from "@/lib/links";
+import { listExtractions, listLinks } from "@/lib/links";
+import { AddLinksForm } from "../add-links-form";
 import { AutoRefresh } from "../../auto-refresh";
 import { LinksTable } from "../../links-table";
 import { EventList, formatAgo, StatusBadge } from "../../ui";
-import { checkNow, toggleContainer } from "../actions";
+import { checkNow, retryExtractions, toggleContainer } from "../actions";
+
+const ARCHIVE_STYLES = {
+  extracted: "text-emerald-600 dark:text-emerald-400",
+  incomplete: "text-muted",
+  wrong_password: "text-amber-500",
+  failed: "text-red-500",
+} as const;
 
 export default function ContainerPage({ params }: PageProps<"/containers/[id]">) {
   return (
@@ -27,6 +35,7 @@ async function ContainerDetail({ params }: { params: Promise<{ id: string }> }) 
   // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
   const links = listLinks(container.id);
+  const archives = listExtractions(container.id);
   const busy = links.some((l) => l.status === "resolving" || l.status === "downloading");
   const rows: [string, React.ReactNode][] = [
     ["URL", <a key="url" href={container.url} target="_blank" rel="noreferrer" className="break-all hover:text-accent">{container.url}</a>],
@@ -75,6 +84,38 @@ async function ContainerDetail({ params }: { params: Promise<{ id: string }> }) 
         <h2 className="border-b border-border px-4 py-2 font-medium">Links</h2>
         <LinksTable links={links} now={now} empty="No links found yet. They appear here after the next check." />
       </section>
+
+      <details className="card">
+        <summary className="cursor-pointer px-4 py-2 font-medium">Add links by hand</summary>
+        <AddLinksForm containerId={container.id} />
+      </details>
+
+      {archives.length > 0 && (
+        <section className="card">
+          <div className="flex items-center justify-between border-b border-border px-4 py-2">
+            <h2 className="font-medium">Archives</h2>
+            {archives.some((a) => a.status === "failed" || a.status === "wrong_password") && (
+              <form action={retryExtractions}>
+                <input type="hidden" name="id" value={container.id} />
+                <button className="btn">Retry failed</button>
+              </form>
+            )}
+          </div>
+          <ul className="divide-y divide-border text-sm">
+            {archives.map((a) => (
+              <li key={a.id} className="flex flex-wrap gap-x-3 px-4 py-2">
+                <span className="min-w-0 flex-1 truncate font-mono text-xs" title={a.entry_path}>
+                  {a.entry_path}
+                </span>
+                <span className={ARCHIVE_STYLES[a.status]}>
+                  {a.status === "extracted" ? `extracted ${a.files} file(s)` : a.status.replace("_", " ")}
+                </span>
+                {a.error && <span className="w-full text-xs text-red-500">{a.error}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="card">
         <h2 className="border-b border-border px-4 py-2 font-medium">Activity</h2>
