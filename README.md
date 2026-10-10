@@ -9,6 +9,8 @@ Hands-off downloads for your *arr stack. Point Riparr at a **container** (a link
 - **Archives:** zip, 7z and RAR/RAR5, including multi-part sets and passwords
 - **Extras:** FlareSolverr for Cloudflare-protected pages, webhook/Discord/Apprise notifications, REST API, single-user login
 
+Full documentation is in [`docs/`](docs/README.md): installation, user guide, configuration, API, troubleshooting, architecture and development.
+
 ## Quick start (Docker)
 
 ```yaml
