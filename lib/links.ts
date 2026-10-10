@@ -70,6 +70,10 @@ export type FileRow = {
   speed_bps: number;
   season: number | null;
   episode: number | null;
+  /** Consecutive stalled attempts; reset when the file finishes. */
+  stalls: number;
+  /** When the user was told no working copy of this file is left; null if never. */
+  blocked_notified_at: number | null;
 };
 
 /**
@@ -212,6 +216,16 @@ export function markResolved(id: number) {
   run("UPDATE links SET resolved_at = ?, status = 'queued', error = NULL, attempts = 0, retry_at = NULL, updated_at = ? WHERE id = ?", Date.now(), Date.now(), id);
 }
 
+/** Links of a title not resolved yet (new, or waiting to retry resolving): they may still add copies. */
+export function unresolvedLinkCount(titleId: number): number {
+  return (
+    one<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM links WHERE title_id = ? AND resolved_at IS NULL AND status IN ('new', 'queued', 'resolving')",
+      titleId,
+    )?.n ?? 0
+  );
+}
+
 /** Titles with links still in play, i.e. where mirror selection may have work. */
 export function titlesWithActiveLinks(): number[] {
   return all<{ id: number }>(
@@ -241,6 +255,8 @@ export type TitleFile = {
   linkDiscoveredAt: number;
   linkRetryAt: number | null;
   linkResolvedAt: number | null;
+  fileStalls: number;
+  blockedNotifiedAt: number | null;
 };
 
 /** Every file of a title (across all its sources) with its link's state, for mirror selection and settling. */
@@ -248,7 +264,8 @@ export function titleFiles(titleId: number): TitleFile[] {
   return all<TitleFile>(
     `SELECT f.id AS fileId, l.id AS linkId, l.host, f.remote_name AS name, f.dir, f.size,
             f.status AS fileStatus, l.status AS linkStatus, l.discovered_at AS linkDiscoveredAt,
-            l.retry_at AS linkRetryAt, l.resolved_at AS linkResolvedAt
+            l.retry_at AS linkRetryAt, l.resolved_at AS linkResolvedAt,
+            f.stalls AS fileStalls, f.blocked_notified_at AS blockedNotifiedAt
        FROM files f JOIN links l ON l.id = f.link_id
       WHERE l.title_id = ?`,
     titleId,
@@ -355,7 +372,7 @@ export function upsertFiles(
 
 export function updateFile(
   id: number,
-  patch: Partial<Pick<FileRow, "status" | "bytes_done" | "local_path" | "error" | "attempts" | "speed_bps">>,
+  patch: Partial<Pick<FileRow, "status" | "bytes_done" | "local_path" | "error" | "attempts" | "speed_bps" | "stalls" | "blocked_notified_at">>,
 ) {
   const keys = Object.keys(patch) as (keyof typeof patch)[];
   if (keys.length === 0) return;

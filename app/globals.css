@@ -1,55 +1,186 @@
+@import "./tokens.css";
 @import "tailwindcss";
 
-:root {
-  --background: #f6f7f9;
-  --surface: #ffffff;
-  --border: #e3e6ea;
-  --foreground: #16181d;
-  --muted: #5f6672;
-  --accent: #2f7de1;
-}
+/* Manual dark choice; the system setting is handled inside tokens.css. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 @theme inline {
-  --color-background: var(--background);
+  --color-bg: var(--bg);
   --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
   --color-border: var(--border);
-  --color-foreground: var(--foreground);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
   --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-grid: var(--grid);
   --color-accent: var(--accent);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-fg: var(--accent-fg);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-fg: var(--primary-fg);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-critical: var(--critical);
+  --color-critical-soft: var(--critical-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-paused: var(--paused);
+  --color-paused-soft: var(--paused-soft);
+  --color-overlay: var(--overlay);
+  --color-on-poster: var(--on-poster);
+  --color-host-gofile: var(--host-gofile);
+  --color-host-pixeldrain: var(--host-pixeldrain);
+  --color-host-mega: var(--host-mega);
+  --color-host-other: var(--host-other);
+  --font-display: var(--font-display);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-pill: var(--radius-pill);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  /* Phone layout below 860px, matching the mockups. */
+  --breakpoint-md: 860px;
+  --breakpoint-lg: 1000px;
+  --breakpoint-xl: 1240px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #121418;
-    --surface: #1b1e24;
-    --border: #2b3039;
-    --foreground: #e7e9ed;
-    --muted: #949bab;
-    --accent: #4b93ef;
-  }
+html,
+body {
+  height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: var(--text-base, 14px);
+  line-height: var(--leading-normal, 1.5);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 @layer components {
-  .input {
-    @apply w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-accent;
+  .font-display {
+    font-family: var(--font-display);
   }
-  .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 text-sm font-medium hover:border-accent disabled:opacity-50;
-  }
-  .btn-primary {
-    @apply border-accent bg-accent text-white hover:brightness-110;
-  }
-  .btn-danger {
-    @apply text-red-500 hover:border-red-500;
+  .label-caps {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: var(--tracking-label, 0.06em);
+    text-transform: uppercase;
+    color: var(--muted);
   }
   .card {
-    @apply rounded-lg border border-border bg-surface;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-xs);
+  }
+  .input {
+    width: 100%;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--fg);
+    padding: 0.5rem 0.75rem;
+    font-size: 14px;
+    min-height: 38px;
+  }
+  .input:focus {
+    outline: 2px solid var(--focus);
+    outline-offset: -1px;
+    border-color: transparent;
+  }
+  .input::placeholder {
+    color: var(--faint);
+  }
+  .input-mono {
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    min-height: 36px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--fg);
+    padding: 0.4rem 0.85rem;
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    transition: background var(--dur-fast, 120ms) var(--ease, ease);
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--surface-2);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--primary-fg);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--primary-hover);
+  }
+  .btn-danger {
+    color: var(--critical);
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: var(--critical-soft);
+  }
+  .btn-ghost {
+    border-color: transparent;
+    background: transparent;
+  }
+  .link {
+    color: var(--accent-ink);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  @media (max-width: 859px) {
+    /* 16px stops iOS zooming into focused inputs. */
+    .input {
+      font-size: 16px;
+    }
   }
 }

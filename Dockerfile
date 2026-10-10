@@ -16,6 +16,7 @@ RUN sed -i 's/^Components: main$/Components: main non-free/' /etc/apt/sources.li
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+# RIPARR_DOWNLOADS_DIR is only used to migrate pre-v1 data (it becomes the first root folder).
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     HOSTNAME=0.0.0.0 \
@@ -29,7 +30,7 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/dist/worker.mjs ./worker.mjs
 COPY docker/entrypoint.sh /entrypoint.sh
 
-VOLUME ["/config", "/downloads"]
+VOLUME ["/config"]
 # 7676: web UI. 9666: Click'n'Load listener (Phase 3).
 EXPOSE 7676 9666
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \

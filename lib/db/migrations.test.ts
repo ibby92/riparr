@@ -131,3 +131,25 @@ describe("migration 8 (titles, sources, root folders)", () => {
     expect(calls).toEqual([7]);
   });
 });
+
+describe("migration 9 (host limits, stalls, usage)", () => {
+  it("adds host tables and file stall columns, keeping existing files", () => {
+    const db = databaseAt(8);
+    db.exec(`
+      INSERT INTO root_folders (id, path, created_at) VALUES (1, '/srv/media', 1);
+      INSERT INTO titles (id, type, name, root_folder_id, folder, created_at, updated_at) VALUES (1, 'show', 'X', 1, 'X', 1, 1);
+      INSERT INTO links (id, title_id, url, fingerprint, host, status, discovered_at) VALUES (10, 1, 'u', 'fp', 'mega', 'queued', 1);
+      INSERT INTO files (id, link_id, remote_name, status, updated_at, key, bytes_done) VALUES (100, 10, 'a.mkv', 'standby', 1, 'a', 42);
+    `);
+    migrate(db);
+    expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length });
+    expect({ ...db.prepare("SELECT bytes_done, stalls, blocked_notified_at FROM files WHERE id = 100").get() }).toEqual({
+      bytes_done: 42,
+      stalls: 0,
+      blocked_notified_at: null,
+    });
+    db.exec("INSERT INTO host_status (host, limited_until, limit_reason) VALUES ('mega', 5, 'MEGA transfer quota')");
+    db.exec("INSERT INTO host_usage (host, day, bytes) VALUES ('mega', '2026-10-10', 7)");
+    expect(() => db.exec("INSERT INTO host_usage (host, day) VALUES ('mega', '2026-10-10')")).toThrow();
+  });
+});

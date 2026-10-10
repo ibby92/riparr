@@ -336,6 +336,32 @@ export const MIGRATIONS: Migration[] = [
       DROP TABLE containers;
     `.replace("?1", `'${ctx.downloadsRoot.replaceAll("'", "''")}'`));
   },
+  // Host limits, stalls and usage: host-wide cooldowns, per-host health, bytes per host per UTC day.
+  `
+    CREATE TABLE host_status (
+      host              TEXT PRIMARY KEY,
+      -- Host-wide cooldown (transfer cap, quota); NULL when not limited.
+      limited_until     INTEGER,
+      limit_reason      TEXT,
+      -- Start of the current limited episode (kept while the limit is extended), for "limited too long" alerts.
+      limited_since     INTEGER,
+      limit_notified_at INTEGER,
+      last_ok_at        INTEGER,
+      last_error_at     INTEGER,
+      last_error        TEXT
+    );
+    CREATE TABLE host_usage (
+      host  TEXT    NOT NULL,
+      day   TEXT    NOT NULL, -- UTC, YYYY-MM-DD
+      bytes INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (host, day)
+    ) WITHOUT ROWID;
+    -- Consecutive stalls; after 2 another host's copy is preferred.
+    ALTER TABLE files ADD COLUMN stalls INTEGER NOT NULL DEFAULT 0;
+    -- Set once the user was told no working copy of this file is left.
+    ALTER TABLE files ADD COLUMN blocked_notified_at INTEGER;
+    CREATE INDEX links_host ON links(host);
+  `,
 ];
 
 /** Latest schema version (number of migrations). */

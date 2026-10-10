@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>Riparr</title>
+  <defs>
+    <clipPath id="fl"><polygon points="0,0 31.8,0 31.8,14 29.2,19.5 33.4,25 29,30.5 33.4,36 29.2,41.5 31.8,47 31.8,64 0,64"/></clipPath>
+    <clipPath id="fr"><polygon points="34.6,0 64,0 64,64 34.6,64 34.6,47 32,41.5 36.2,36 31.8,30.5 36.2,25 32,19.5 34.6,14"/></clipPath>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#0f7c86"/>
+  <g fill="#ffffff" fill-rule="evenodd" transform="translate(-1.6 -2.6)">
+    <path clip-path="url(#fl)" d="M17 18h30a6 6 0 0 1 6 6v18a6 6 0 0 1-6 6H17a6 6 0 0 1-6-6V24a6 6 0 0 1 6-6ZM20 27v10h24V27Z"/>
+    <g transform="translate(2.6 5.2) rotate(6 34 18)"><path clip-path="url(#fr)" d="M17 18h30a6 6 0 0 1 6 6v18a6 6 0 0 1-6 6H17a6 6 0 0 1-6-6V24a6 6 0 0 1 6-6ZM20 27v10h24V27Z"/></g>
+  </g>
+</svg>

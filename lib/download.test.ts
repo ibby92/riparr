@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { downloadFile } from "./download";
+import { StallError } from "./errors";
 import type { FileHash, RemoteFile } from "./hosts/types";
 
 const SIZE = 1024 * 1024 + 123;
@@ -38,6 +39,11 @@ beforeAll(async () => {
       res.writeHead(206, { "content-range": `bytes ${start}-${SIZE - 1}/${SIZE}`, "content-length": body.length });
     } else {
       res.writeHead(200, { "content-length": body.length });
+    }
+    if (url.pathname === "/hang") {
+      // Some bytes, then silence with the connection open.
+      res.write(body.subarray(0, 100_000));
+      return;
     }
     if (url.pathname !== "/slow") return res.end(body);
     // Trickle so the client can abort mid-way.
@@ -103,6 +109,26 @@ describe("downloadFile", () => {
     expect(await exists(p.partialPath)).toBe(false);
     expect(progress.at(-1)).toEqual([SIZE, SIZE]);
     expect(progress.length).toBeLessThan(10);
+  });
+
+  it("aborts a transfer that stops sending bytes with StallError, keeping the partial for resume", async () => {
+    const p = paths();
+    const starts: number[] = [];
+    const err = await downloadFile(remote("/hang"), {
+      ...p,
+      signal: AbortSignal.timeout(10_000),
+      stallMs: 200,
+      onStart: (o) => starts.push(o),
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(StallError);
+    expect(starts).toEqual([0]);
+    expect((await stat(p.partialPath)).size).toBe(100_000);
+
+    const res = await downloadFile(remote(), { ...p, signal: AbortSignal.timeout(10_000), stallMs: 200, onStart: (o) => starts.push(o) });
+    expect(res.status).toBe("done");
+    expect(starts).toEqual([0, 100_000]);
+    expect(requests.at(-1)).toEqual({ path: "/file", range: "bytes=100000-" });
+    expect((await readFile(p.finalPath)).equals(DATA)).toBe(true);
   });
 
   it("resumes from a partial file", async () => {

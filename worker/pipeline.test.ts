@@ -23,6 +23,8 @@ const { httpOpener } = await import("@/lib/hosts/http");
 const { listFiles, listLinks } = await import("@/lib/links");
 const { checkSource } = await import("./check");
 const { scheduleDownloads } = await import("./pipeline");
+const { clearHostLimit, clock, hostLimit } = await import("@/lib/host-status");
+const { hostStatuses, queueOverview } = await import("@/lib/queue");
 const { findSevenZip } = await import("./extract");
 const { makeCrateSite } = await import("@/lib/crawlers/crate-fixture");
 const crateSite = makeCrateSite("polltest");
@@ -57,6 +59,10 @@ const mirrorCrates: Record<string, string[]> = {};
 const rawHits: string[] = [];
 /** Per `${host}:${name}` HTTP status override for downloads: 404 (gone) or 429 (rate limited). */
 const rawStatus = new Map<string, number>();
+/** Range header (or "") of each mirror download request, per `${host}:${name}`. */
+const rawRanges = new Map<string, string[]>();
+/** `${host}:${name}` whose next download sends this many bytes and then goes silent. */
+const rawStallAfter = new Map<string, number>();
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url!, base);
@@ -79,8 +85,10 @@ const server = http.createServer((req, res) => {
   const mirrorRaw = /^\/raw([ab])\/(.+)$/.exec(url.pathname);
   if (mirrorRaw) {
     const [, host, name] = mirrorRaw;
-    rawHits.push(`${host}:${name}`);
-    const forced = rawStatus.get(`${host}:${name}`);
+    const key = `${host}:${name}`;
+    rawHits.push(key);
+    rawRanges.set(key, [...(rawRanges.get(key) ?? []), req.headers.range ?? ""]);
+    const forced = rawStatus.get(key);
     if (forced) {
       res.writeHead(forced, forced === 429 ? { "retry-after": "3600" } : {}).end();
       return;
@@ -90,8 +98,17 @@ const server = http.createServer((req, res) => {
       res.writeHead(404).end();
       return;
     }
-    res.writeHead(200, { "content-length": body.length });
-    res.end(body);
+    const start = Number(/^bytes=(\d+)-$/.exec(req.headers.range ?? "")?.[1] ?? 0);
+    const stallAfter = rawStallAfter.get(key);
+    if (start > 0) res.writeHead(206, { "content-range": `bytes ${start}-${body.length - 1}/${body.length}`, "content-length": body.length - start });
+    else res.writeHead(200, { "content-length": body.length });
+    if (stallAfter !== undefined) {
+      // Send some bytes, then hang with the connection open, like a throttled or wedged host.
+      rawStallAfter.delete(key);
+      res.write(body.subarray(start, stallAfter));
+      return;
+    }
+    res.end(body.subarray(start));
     return;
   }
   if (url.pathname === "/crate2") {
@@ -160,6 +177,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  server.closeAllConnections();
   server.close();
   closeDb();
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -319,6 +337,111 @@ describe("pipeline + preferred hosts", () => {
     expect(statuses(id)).toEqual({ hosta: "done", hostb: "mirror" });
     expect(hitsFor("m3.bin")).toEqual(["b:m3.bin", "a:m3.bin"]);
     expect(saved("m3.bin").equals(files["m3.bin"])).toBe(true);
+    // An hour-long Retry-After is a host-wide cooldown; lift it so later tests can use hostb.
+    expect(hostLimit("hostb")).toMatchObject({ reason: "hostb rate limit" });
+    clearHostLimit("hostb");
+  });
+});
+
+describe("pipeline + host limits, stalls and usage", () => {
+  const signal = new AbortController().signal;
+  const HOUR = 3_600_000;
+  let n = 0;
+
+  async function limitTitle(links: string[]) {
+    const key = `h${++n}`;
+    mirrorCrates[key] = links;
+    const id = addTitle({ name: `Limits ${key}`, url: `${base}/mcrate/${key}`, folder: `limits/${key}` });
+    await check(id, signal);
+    return { id, dir: path.join(tmp, "downloads", "limits", key) };
+  }
+  const byUrl = (id: number) => Object.fromEntries(listLinks(id).map((l) => [l.url.slice(base.length), l]));
+
+  /** Runs scheduling passes until `done` holds. */
+  async function runUntil(done: () => boolean, timeoutMs = 10_000) {
+    const shutdown = new AbortController();
+    const deadline = Date.now() + timeoutMs;
+    try {
+      while (!done()) {
+        if (Date.now() > deadline) throw new Error("Timed out");
+        scheduleDownloads(shutdown.signal);
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    } finally {
+      shutdown.abort();
+    }
+  }
+
+  beforeAll(async () => {
+    // One download per host at a time, so host B's second link is still waiting when B's limit hits.
+    (await import("@/lib/settings")).saveSettings({ hostPriority: ["hostb", "hosta"], perHost: 1 });
+    for (const name of ["l1.bin", "l2.bin", "s1.bin"]) files[name] = crypto.randomBytes(40_000);
+  });
+  afterAll(async () => {
+    clock.now = () => Date.now();
+    (await import("@/lib/settings")).saveSettings({ perHost: 2, stallMinutes: 3 });
+  });
+
+  it("puts the whole host in cooldown, uses the mirror meanwhile, and resumes the host after its reset", async () => {
+    rawStatus.set("b:l1.bin", 429); // Retry-After: 3600
+    const { id, dir } = await limitTitle(["/b/l1.bin", "/a/l1.bin", "/b/l2.bin"]);
+    const links = () => byUrl(id);
+
+    await runUntil(() => links()["/a/l1.bin"].status === "done");
+    const limit = hostLimit("hostb")!;
+    expect(limit).toMatchObject({ reason: "hostb rate limit" });
+    expect(limit.until).toBeGreaterThan(Date.now() + HOUR - 60_000);
+
+    // l1 came from hosta, so hostb's copy isn't needed; hostb's other link never started:
+    // it waits for the reset, and the queue says why.
+    expect(links()["/b/l1.bin"].status).toBe("mirror");
+    expect(links()["/b/l2.bin"]).toMatchObject({ status: "queued", retry_at: limit.until });
+    expect(hitsFor("l2.bin")).toEqual([]);
+    const waiting = queueOverview().waitingOnHost;
+    expect(waiting.map((w) => [w.host, w.reason, w.until])).toEqual([["hostb", "hostb rate limit", limit.until]]);
+    expect(waiting[0].items.map((i) => [i.url.slice(base.length), i.next_attempt_at])).toEqual([["/b/l2.bin", limit.until]]);
+    expect(hostStatuses().find((h) => h.host === "hostb")).toMatchObject({ state: "limited", until: limit.until });
+
+    // Past the reset (host fixed meanwhile): hostb resumes on its own, without anyone clearing anything.
+    rawStatus.delete("b:l1.bin");
+    clock.now = () => Date.now() + 2 * HOUR;
+    await runUntil(() => links()["/b/l2.bin"].status === "done");
+    expect(fs.readFileSync(path.join(dir, "l2.bin")).equals(files["l2.bin"])).toBe(true);
+    // The successful request after the reset ended the cooldown.
+    expect(hostLimit("hostb", clock.now())).toBeNull();
+    expect(hostStatuses(clock.now()).find((h) => h.host === "hostb")).toMatchObject({ state: "ok", until: null });
+    clock.now = () => Date.now();
+  });
+
+  it("aborts a stalled download, keeps the partial and resumes it with a Range request", async () => {
+    (await import("@/lib/settings")).saveSettings({ stallMinutes: 0.005 }); // 300 ms
+    rawStallAfter.set("a:s1.bin", 15_000);
+    const { id, dir } = await limitTitle(["/a/s1.bin"]);
+    const link = () => byUrl(id)["/a/s1.bin"];
+
+    await runUntil(() => (link().error ?? "").startsWith("Stalled"));
+    expect(link()).toMatchObject({ status: "queued", attempts: 1 });
+    expect(link().retry_at).toBeGreaterThan(Date.now());
+    const file = listFiles(link().id)[0];
+    expect(file).toMatchObject({ stalls: 1, bytes_done: 15_000 });
+    expect(fs.statSync(path.join(downloads, ".riparr-partial", `${file.id}.part`)).size).toBe(15_000);
+    expect(queueOverview().retrying.map((i) => i.id)).toContain(link().id);
+
+    clock.now = () => Date.now() + 60_000; // past the short stall retry
+    await runUntil(() => link().status === "done");
+    clock.now = () => Date.now();
+    expect(rawRanges.get("a:s1.bin")).toEqual(["", "bytes=15000-"]);
+    expect(fs.readFileSync(path.join(dir, "s1.bin")).equals(files["s1.bin"])).toBe(true);
+    expect(listFiles(link().id)[0].stalls).toBe(0);
+  });
+
+  it("records bytes downloaded per host for today", () => {
+    const usage = Object.fromEntries(hostStatuses().map((h) => [h.host, h.bytesToday]));
+    // hosta: m2, m3, l1 (20k + 20k + 40k) and s1 (15k before the stall + 25k after).
+    expect(usage.hosta).toBe(20_000 + 20_000 + 40_000 + 40_000);
+    expect(usage.hostb).toBeGreaterThanOrEqual(20_000 + 40_000);
+    expect(usage.fakehost).toBeGreaterThan(0);
+    expect(hostStatuses().slice(0, 3).map((h) => h.host)).toEqual(["gofile", "pixeldrain", "mega"]);
   });
 });
 

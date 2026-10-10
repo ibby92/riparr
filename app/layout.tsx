@@ -1,51 +1,65 @@
-import type { Metadata } from "next";
-import Link from "next/link";
-import { Geist, Geist_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { IBM_Plex_Mono, IBM_Plex_Sans, Newsreader } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const newsreader = Newsreader({
+  variable: "--font-newsreader",
   subsets: ["latin"],
+  axes: ["opsz"],
+  display: "swap",
 });
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const plexSans = IBM_Plex_Sans({
+  variable: "--font-plex-sans",
   subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  display: "swap",
+});
+const plexMono = IBM_Plex_Mono({
+  variable: "--font-plex-mono",
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
   title: { default: "Riparr", template: "%s · Riparr" },
-  description: "Tracks shows and movies and downloads new episodes into your library",
+  description: "Tracks your shows and movies and downloads new episodes into your library",
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/favicon-32.png", sizes: "32x32" },
+    ],
+    apple: "/apple-touch-icon.png",
+  },
+  appleWebApp: { capable: true, title: "Riparr", statusBarStyle: "default" },
 };
 
-const NAV = [
-  { href: "/", label: "Dashboard" },
-  { href: "/titles", label: "Library" },
-  { href: "/queue", label: "Queue" },
-  { href: "/settings", label: "Settings" },
-] as const;
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#0f7c86" },
+    { media: "(prefers-color-scheme: dark)", color: "#0e1315" },
+  ],
+  viewportFit: "cover",
+};
+
+/**
+ * Applies a saved manual theme before first paint. With nothing saved, tokens.css
+ * follows the system setting (no data-theme attribute).
+ */
+const THEME_SCRIPT = `try{var t=localStorage.getItem("riparr-theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}`;
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
+      className={`${newsreader.variable} ${plexSans.variable} ${plexMono.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col font-sans">
-        <header className="border-b border-border bg-surface">
-          <nav className="mx-auto flex max-w-6xl items-center gap-6 px-4 py-3">
-            <Link href="/" className="text-lg font-semibold tracking-tight">
-              Rip<span className="text-accent">arr</span>
-            </Link>
-            {NAV.map((item) => (
-              <Link key={item.href} href={item.href} className="text-sm text-muted hover:text-foreground">
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-        </header>
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">{children}</main>
-      </body>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
+      <body className="min-h-full">{children}</body>
     </html>
   );
 }

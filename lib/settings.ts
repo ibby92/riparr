@@ -37,6 +37,8 @@ export type AppSettings = {
   bytesPerSecond: number;
   /** Host ids in order of preference for identical files on several hosts; unlisted hosts come last. */
   hostPriority: string[];
+  /** A download with no new bytes for this long is aborted and resumed from its partial; 0 = off. */
+  stallMinutes: number;
   /** New downloads wait while the downloads volume has less free space than this (GB); 0 = off. */
   minFreeGb: number;
   cnlEnabled: boolean;
@@ -70,6 +72,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   concurrency: 3,
   perHost: 2,
   bytesPerSecond: 0,
+  stallMinutes: 3,
   minFreeGb: 5,
   hostPriority: ["gofile", "pixeldrain", "mega"],
   cnlEnabled: true,
@@ -92,6 +95,7 @@ const SETTING_KEYS: Record<keyof AppSettings, string> = {
   concurrency: "downloads.concurrency",
   perHost: "downloads.per_host",
   bytesPerSecond: "downloads.bytes_per_second",
+  stallMinutes: "downloads.stall_minutes",
   minFreeGb: "downloads.min_free_gb",
   hostPriority: "downloads.host_priority",
   cnlEnabled: "cnl.enabled",

@@ -2,7 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
+/** Copies kept per kind: pre-upgrade backups (riparr-v<N>-…) and manual/other ones are counted separately. */
 const KEEP = 5;
+
+/** Pre-upgrade backups are named riparr-v<schema>-<timestamp>.db. */
+export function isUpgradeBackup(name: string) {
+  return /^riparr-v\d+-/.test(name);
+}
 
 export function backupsDir(configDir: string) {
   return path.join(configDir, "backups");
@@ -42,8 +48,14 @@ export function listBackups(configDir: string): BackupFile[] {
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
+/** Keeps the newest `keep` of each kind, so manual backups never push out pre-upgrade ones (or vice versa). */
 function pruneBackups(dir: string, keep: number) {
-  for (const old of listBackups(path.dirname(dir)).slice(keep)) {
+  const all = listBackups(path.dirname(dir));
+  const excess = [
+    ...all.filter((b) => isUpgradeBackup(b.name)).slice(keep),
+    ...all.filter((b) => !isUpgradeBackup(b.name)).slice(keep),
+  ];
+  for (const old of excess) {
     try {
       fs.unlinkSync(old.path);
     } catch {}

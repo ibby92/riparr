@@ -1,6 +1,6 @@
+# Riparr, deployed like Sonarr/Radarr. Build the image first with `npm run release`.
 services:
   riparr:
-    build: .
     image: riparr:latest
     container_name: riparr
     restart: unless-stopped
@@ -11,15 +11,12 @@ services:
       - TZ=Etc/UTC
     volumes:
       - ./config:/config
-      # Point this at the same media root your *arr apps use.
-      - /path/to/media:/downloads
+      # Your media library, e.g. the NAS "Videos" share. Add root folders under it in
+      # Settings → Media Management (e.g. /media/Kdrama, /media/Movies).
+      - /path/to/Videos:/media
     ports:
-      - "7676:7676"
-      - "9666:9666"
-
-  # Optional: for container pages behind a Cloudflare challenge.
-  # Then set http://flaresolverr:8191 in Settings → Integrations.
-  # flaresolverr:
-  #   image: ghcr.io/flaresolverr/flaresolverr:latest
-  #   container_name: flaresolverr
-  #   restart: unless-stopped
+      - "7676:7676" # web UI
+      - "9666:9666" # Click'n'Load listener
+    # FlareSolverr and a VPN proxy (e.g. gluetun's HTTPPROXY) are set by URL in
+    # Settings → Connections. Their hostnames only resolve if Riparr shares their
+    # Docker network; see docker-compose.existing-gluetun.yml for an example.

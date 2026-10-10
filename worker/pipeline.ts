@@ -1,14 +1,29 @@
 import path from "node:path";
 import PQueue from "p-queue";
 import { downloadFile } from "@/lib/download";
-import { HostOfflineError, NeedsAttentionError, RateLimitError } from "@/lib/errors";
+import { HostOfflineError, NeedsAttentionError, RateLimitError, StallError } from "@/lib/errors";
 import { logEvent } from "@/lib/events";
 import { hostAccount } from "@/lib/host-accounts";
+import {
+  addHostUsage,
+  clock,
+  HOST_COOLDOWN_MIN_MS,
+  hostLabel,
+  hostLimit,
+  holdLimitedHosts,
+  LONG_LIMIT_MS,
+  limitReason,
+  notifyLongLimits,
+  recordHostError,
+  recordHostLimit,
+  recordHostOk,
+} from "@/lib/host-status";
 import { findResolver } from "@/lib/hosts";
 import type { RemoteFile } from "@/lib/hosts/types";
 import {
   titleFiles,
   titlesWithActiveLinks,
+  unresolvedLinkCount,
   downloadableLinks,
   failLinkFiles,
   getLink,
@@ -23,8 +38,9 @@ import {
   upsertFiles,
   type FileRow,
   type Link,
+  type TitleFile,
 } from "@/lib/links";
-import { planMirrors } from "@/lib/mirrors";
+import { groupMirrors, planMirrors } from "@/lib/mirrors";
 import { fetchFor } from "@/lib/net";
 import { notify } from "@/lib/notify";
 import { parseEpisode } from "@/lib/episodes";
@@ -40,6 +56,8 @@ const MAX_ATTEMPTS = 5;
 const PARTIAL_DIR = ".riparr-partial";
 const PROGRESS_WRITE_MS = 1_000;
 const RESOLVE_CONCURRENCY = 4;
+/** A stalled download retries soon: the partial is kept and the host is usually fine. */
+const STALL_RETRY_MS = 30_000;
 
 type Job = { link: Link; controller: AbortController };
 
@@ -84,16 +102,20 @@ function startJob(link: Link, shutdown: AbortSignal, run: (signal: AbortSignal) 
  * file to download, settle finished links, then start downloads.
  */
 export function scheduleDownloads(shutdown: AbortSignal) {
+  const now = clock.now();
   applyConcurrency();
+  // Host cooldowns hold every pending link of the host (retry_at), so the queries below skip them.
+  holdLimitedHosts(now);
+  notifyLongLimits(now);
 
-  for (const link of unresolvedLinks()) {
+  for (const link of unresolvedLinks(now)) {
     if (jobs.has(link.id) || shutdown.aborted) continue;
     startJob(link, shutdown, (signal) => resolveQueue.add(() => resolveLink(link, signal)));
   }
 
-  for (const titleId of titlesWithActiveLinks()) selectAndSettle(titleId);
+  for (const titleId of titlesWithActiveLinks()) selectAndSettle(titleId, now);
 
-  for (const link of downloadableLinks()) {
+  for (const link of downloadableLinks(now)) {
     if (jobs.has(link.id) || shutdown.aborted) continue;
     // Running downloads finish; nothing new starts on a root folder that's low on space.
     const root = getTitle(link.title_id)?.root_path;
@@ -119,14 +141,44 @@ export function activeJobCount() {
 }
 
 /** Mirror selection for one title (across all its sources), then finalizes links whose files are all accounted for. */
-export function selectAndSettle(titleId: number, now = Date.now()) {
+export function selectAndSettle(titleId: number, now = clock.now()) {
   // Wait until every freshly found link is resolved, so a quick host doesn't win by default.
   if (resolvingInProgress(titleId)) return;
   const priority = getSettings().hostPriority;
-  const plan = planMirrors(titleFiles(titleId), priority, now);
+  const files = titleFiles(titleId);
+  const plan = planMirrors(files, priority, now);
   setFileStatuses(plan.promote, "queued");
   setFileStatuses(plan.standby, "standby");
   settleLinks(titleId, new Set(plan.covered));
+  notifyBlockedFiles(titleId, files, now);
+}
+
+/**
+ * Tells the user (once per file) when a title can't progress: every copy of a
+ * file is on a dead link or on a host that has been limited for LONG_LIMIT_MS.
+ */
+function notifyBlockedFiles(titleId: number, files: TitleFile[], now: number) {
+  if (files.length === 0 || unresolvedLinkCount(titleId) > 0) return;
+  const longLimited = (host: string) => {
+    const limit = hostLimit(host, now);
+    return limit !== null && limit.since <= now - LONG_LIMIT_MS;
+  };
+  const dead = new Set(["failed", "offline", "ignored"]);
+  for (const group of groupMirrors(files)) {
+    const copies = group as TitleFile[];
+    if (copies.some((f) => ["done", "skipped", "downloading"].includes(f.fileStatus))) continue;
+    if (copies.some((f) => f.blockedNotifiedAt !== null)) continue;
+    const blocked = copies.every(
+      (f) => f.fileStatus === "failed" || dead.has(f.linkStatus) || longLimited(f.host),
+    );
+    if (!blocked) continue;
+    for (const f of copies) updateFile(f.fileId, { blocked_notified_at: now });
+    const title = getTitle(titleId);
+    const hosts = [...new Set(copies.map((f) => hostLabel(f.host)))].join(", ");
+    const message = `No working copy of ${copies[0].name} (tried ${hosts})`;
+    logEvent("error", message, titleId);
+    void notify({ event: "needs_attention", message, subject: title && { id: title.id, name: title.name } });
+  }
 }
 
 function settleLinks(titleId: number, covered: Set<number>) {
@@ -168,6 +220,8 @@ function stillWanted(link: Link) {
   const current = getLink(link.id);
   const title = current && getTitle(current.title_id);
   if (!current || !title || !title.monitored || !["new", "queued"].includes(current.status)) return null;
+  // The host may have hit a limit while this waited for a slot; the cooldown holds it.
+  if (hostLimit(current.host)) return null;
   return { current, title };
 }
 
@@ -205,6 +259,7 @@ async function resolveLink(link: Link, signal: AbortSignal) {
     setLinkStatus(link.id, "resolving", { attempts: wanted.current.attempts });
     await resolveFiles(link, wanted.title, signal);
     markResolved(link.id);
+    recordHostOk(link.host);
   } catch (err) {
     handleFailure(link, wanted.current.attempts, err, signal);
   }
@@ -220,6 +275,7 @@ async function downloadLink(link: Link, signal: AbortSignal) {
     setLinkStatus(link.id, "downloading", { attempts: current.attempts });
     // Re-resolve for fresh download handles (tokens, signed URLs).
     const { remote } = await resolveFiles(link, title, signal);
+    recordHostOk(link.host);
     const byKey = new Map(remote.map((f) => [f.key, f]));
 
     for (const row of listFiles(link.id)) {
@@ -253,15 +309,29 @@ async function downloadOne(title: TitleWithStats, link: Link, row: FileRow, file
   const partialPath = resolveInside(title.root_path, path.posix.join(PARTIAL_DIR, `${fileId}.part`));
 
   updateFile(fileId, { status: "downloading", error: null });
+  const settings = getSettings();
   let lastWrite = 0;
   let lastBytes: number | null = null;
+  // Data used per host: bytes fetched this run, counted from where the transfer started.
+  let counted: number | null = null;
+  let latest = 0;
+  const countUsage = () => {
+    if (counted === null || latest <= counted) return;
+    addHostUsage(link.host, latest - counted);
+    counted = latest;
+  };
   try {
     const result = await downloadFile(file, {
       finalPath,
       partialPath,
       signal,
-      bytesPerSecond: getSettings().bytesPerSecond || null,
+      bytesPerSecond: settings.bytesPerSecond || null,
+      stallMs: settings.stallMinutes > 0 ? settings.stallMinutes * MINUTE : null,
+      onStart: (offset) => {
+        counted = latest = offset;
+      },
       onProgress: (bytes) => {
+        latest = bytes;
         const now = Date.now();
         if (now - lastWrite < PROGRESS_WRITE_MS) return;
         // The first sample includes resumed bytes, so speed starts from the second.
@@ -269,6 +339,7 @@ async function downloadOne(title: TitleWithStats, link: Link, row: FileRow, file
         lastWrite = now;
         lastBytes = bytes;
         updateFile(fileId, { bytes_done: bytes, speed_bps: Math.max(0, speed) });
+        countUsage();
       },
     });
     updateFile(fileId, {
@@ -276,10 +347,21 @@ async function downloadOne(title: TitleWithStats, link: Link, row: FileRow, file
       local_path: result.path,
       speed_bps: 0,
       bytes_done: file.size ?? ("bytes" in result ? result.bytes : 0),
+      stalls: 0,
     });
+    recordHostOk(link.host);
   } catch (err) {
-    updateFile(fileId, { status: signal.aborted ? "queued" : "failed", error: errorMessage(err), speed_bps: 0 });
+    updateFile(fileId, {
+      status: signal.aborted ? "queued" : "failed",
+      error: errorMessage(err),
+      speed_bps: 0,
+      // Partial files are kept, so progress so far stays visible.
+      ...(counted !== null ? { bytes_done: latest } : {}),
+      ...(err instanceof StallError ? { stalls: row.stalls + 1 } : {}),
+    });
     throw err;
+  } finally {
+    countUsage();
   }
 }
 
@@ -305,9 +387,20 @@ function handleFailure(link: Link, attempts: number, err: unknown, signal: Abort
   }
   if (err instanceof RateLimitError) {
     // Throttling isn't the link's fault, so it doesn't count as an attempt. Other hosts may step in meanwhile.
-    setLinkStatus(link.id, "queued", { error: message, attempts, retryAt: Date.now() + err.retryAfterMs });
+    const now = clock.now();
+    let retryAt = now + err.retryAfterMs;
+    if (err.retryAfterMs >= HOST_COOLDOWN_MIN_MS) {
+      // Long limits (transfer caps, quotas) are per account/IP: the whole host waits, then resumes from partials.
+      const reason = limitReason(link.host, err);
+      const limit = recordHostLimit(link.host, retryAt, reason, now);
+      retryAt = limit.until;
+      if (limit.fresh) {
+        logEvent("warn", `${hostLabel(link.host)} limited (${reason}); its downloads resume at ${new Date(retryAt).toISOString()}`);
+      }
+    }
+    setLinkStatus(link.id, "queued", { error: message, attempts, retryAt });
     parkLinkFiles(link.id);
-    logEvent("info", `Rate limited by ${link.host}, retrying in ${Math.ceil(err.retryAfterMs / MINUTE)}m`, link.title_id);
+    logEvent("info", `Rate limited by ${link.host}, retrying in ${Math.ceil((retryAt - now) / MINUTE)}m`, link.title_id);
     return;
   }
 
@@ -318,7 +411,15 @@ function handleFailure(link: Link, attempts: number, err: unknown, signal: Abort
     return;
   }
 
+  recordHostError(link.host, message);
   const next = attempts + 1;
+  if (err instanceof StallError && next < MAX_ATTEMPTS) {
+    // Resume soon from the partial; after repeated stalls mirror selection prefers another host's copy.
+    setLinkStatus(link.id, "queued", { error: `Stalled: ${message}`, attempts: next, retryAt: clock.now() + STALL_RETRY_MS });
+    parkLinkFiles(link.id);
+    logEvent("warn", `Download stalled on ${link.host} (${message}), resuming shortly: ${link.url}`, link.title_id);
+    return;
+  }
   if (err instanceof NeedsAttentionError || next >= MAX_ATTEMPTS) {
     setLinkStatus(link.id, "failed", { error: message, attempts: next });
     failLinkFiles(link.id, message);
@@ -328,7 +429,7 @@ function handleFailure(link: Link, attempts: number, err: unknown, signal: Abort
     linkSettled(link.title_id);
     return;
   }
-  setLinkStatus(link.id, "queued", { error: message, attempts: next, retryAt: Date.now() + retryDelay(next) });
+  setLinkStatus(link.id, "queued", { error: message, attempts: next, retryAt: clock.now() + retryDelay(next) });
   parkLinkFiles(link.id);
   logEvent("warn", `Attempt ${next}/${MAX_ATTEMPTS} failed for ${link.url}: ${message}`, link.title_id);
 }

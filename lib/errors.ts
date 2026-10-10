@@ -18,3 +18,8 @@ export class RateLimitError extends Error {
     super(message);
   }
 }
+
+/** A transfer made no progress for too long. The partial is kept; retry soon (counts as an attempt). */
+export class StallError extends Error {
+  name = "StallError";
+}

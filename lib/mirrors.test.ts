@@ -145,6 +145,13 @@ describe("planMirrors: failover", () => {
     expect(planMirrors(files, PRIO, NOW)).toEqual(plan([2]));
   });
 
+  it("prefers another host's copy over one that keeps stalling, but still uses it when it's the only one", () => {
+    const stalled = f(1, "pixeldrain", { fileStatus: "queued", fileStalls: 2 });
+    expect(planMirrors([stalled, f(2, "mega")], PRIO, NOW)).toEqual(plan([2], [1]));
+    expect(planMirrors([f(3, "pixeldrain", { fileStalls: 1 }), f(4, "mega")], PRIO, NOW)).toEqual(plan([3]));
+    expect(planMirrors([f(5, "pixeldrain", { fileStalls: 2 })], PRIO, NOW)).toEqual(plan([5]));
+  });
+
   it("changes nothing when no copy is usable", () => {
     const files = [
       f(1, "pixeldrain", { linkStatus: "offline" }),

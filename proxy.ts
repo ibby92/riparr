@@ -29,6 +29,6 @@ export function proxy(req: NextRequest) {
 }
 
 export const config = {
-  // Everything except Next's static assets and the favicon.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // Static files (icons, manifest) stay public so the login page and home-screen icons work signed out.
+  matcher: ["/((?!_next/static|_next/image|.*\\.(?:svg|png|ico|webmanifest)$).*)"],
 };

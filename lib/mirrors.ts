@@ -15,7 +15,12 @@ export type MirrorCandidate = {
   linkDiscoveredAt: number;
   /** Link is rate-limited/backing off until this time; null when not waiting. */
   linkRetryAt: number | null;
+  /** Consecutive stalled attempts on this copy; from STALLS_TO_DEMOTE on, other hosts' copies go first. */
+  fileStalls?: number;
 };
+
+/** Consecutive stalls after which a copy yields to other hosts' copies (if any). */
+export const STALLS_TO_DEMOTE = 2;
 
 export type MirrorPlan = {
   /** standby -> queued: this copy is now the one to download. */
@@ -72,11 +77,12 @@ export function groupMirrors(files: MirrorCandidate[]): MirrorCandidate[][] {
 /**
  * Decides which copy of each file in one container to download, given the
  * preferred host order. Copies whose link waits (`linkRetryAt > now`) only
- * win when every usable copy waits. Pure and idempotent: re-planning after applying the
+ * win when every usable copy waits; then copies that keep stalling lose to the rest. Pure and idempotent: re-planning after applying the
  * result (same `now`) yields no promote/standby changes (`covered` is restated each time).
  */
 export function planMirrors(files: MirrorCandidate[], priority: string[], now: number = Date.now()): MirrorPlan {
   const waiting = (f: MirrorCandidate) => (f.linkRetryAt !== null && f.linkRetryAt > now ? 1 : 0);
+  const stalling = (f: MirrorCandidate) => ((f.fileStalls ?? 0) >= STALLS_TO_DEMOTE ? 1 : 0);
   const promote = new Set<number>();
   const standby = new Set<number>();
   const covered = new Set<number>();
@@ -98,6 +104,7 @@ export function planMirrors(files: MirrorCandidate[], priority: string[], now: n
       .sort(
         (a, b) =>
           waiting(a) - waiting(b) ||
+          stalling(a) - stalling(b) ||
           hostRank(a.host, priority) - hostRank(b.host, priority) ||
           a.linkDiscoveredAt - b.linkDiscoveredAt ||
           a.fileId - b.fileId,

@@ -9,7 +9,7 @@ npm install
 npm run dev        # next dev (:3000) + worker in watch mode, together
 ```
 
-Development data goes in `./config` and `./downloads`. Both are git-ignored, and `RIPARR_CONFIG_DIR` / `RIPARR_DOWNLOADS_DIR` override them. To run only one side: `npm run dev:web` or `npm run worker`.
+Development data goes in `./config` (git-ignored; `RIPARR_CONFIG_DIR` overrides it). Add a root folder under Settings → Media Management, e.g. the absolute path of `./downloads` (git-ignored), before adding titles. To run only one side: `npm run dev:web` or `npm run worker`.
 
 > **Next.js 16:** APIs and conventions differ from older versions; for example, middleware is now `proxy.ts`, and `cacheComponents` changes how data fetching renders. Read the guides bundled in `node_modules/next/dist/docs/` before writing Next-specific code. `AGENTS.md` says the same.
 

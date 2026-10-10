@@ -1,22 +1,32 @@
 # Installation
 
-Riparr ships as a single Docker image that runs two processes: the web UI and a background worker.
+Riparr runs in Docker like Sonarr and Radarr: one image, a `/config` volume for its database, and your media library mounted inside. The image runs two processes, the web UI and a background worker.
 
 ## Requirements
 
-- Docker with Compose.
-- A downloads folder, ideally the same media root your *arr apps use.
-- Optional extras:
-  - [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr), for container pages behind a Cloudflare challenge.
-  - [gluetun](https://github.com/qdm12/gluetun) or another proxy, if your network blocks container sites.
+- Docker with Compose, on the machine that will build and run Riparr. The image is built locally; nothing is published.
+- Your media library mounted into the container, e.g. your NAS `Videos` share.
+- Optional services you can point Riparr at by URL:
+  - [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr), for container pages behind a Cloudflare challenge;
+  - an HTTP or SOCKS5 proxy, such as [gluetun](https://github.com/qdm12/gluetun)'s, for container sites your network blocks.
 
-## Quick start
+## Build the image
+
+From the repository:
+
+```sh
+npm install
+npm run release
+```
+
+`npm run release` runs lint, typecheck and the full test suite, including the 7-Zip tests inside Docker. It then builds `riparr:<version>` and tags it `riparr:latest`.
+
+## Run it
 
 ```yaml
 # docker-compose.yml
 services:
   riparr:
-    build: .
     image: riparr:latest
     container_name: riparr
     restart: unless-stopped
@@ -27,104 +37,93 @@ services:
       - TZ=Etc/UTC
     volumes:
       - ./config:/config
-      - /path/to/media:/downloads
+      - /path/to/Videos:/media   # your media library
     ports:
       - "7676:7676"   # web UI
       - "9666:9666"   # Click'n'Load listener
 ```
 
 ```sh
-docker compose up -d --build
+docker compose up -d
 ```
 
-Open `http://<host>:7676`. The first visit asks you to create the login.
-
-> Port 7878 belongs to Radarr, so Riparr uses **7676**.
+Open `http://<host>:7676`. The first visit asks you to create the login. (Port 7878 is Radarr's, so Riparr uses 7676.)
 
 ## Volumes
 
 | Path | Contents |
 | --- | --- |
-| `/config` | `riparr.db`: the SQLite database holding containers, link history, settings and host credentials |
-| `/downloads` | Download root. Each container's *target directory* is relative to it. Partial downloads live in `/downloads/.riparr-partial/`. |
+| `/config` | `riparr.db` (titles, sources, history, settings, credentials), `backups/`, and `MediaCover/` (cached posters) |
+| Your media mount (e.g. `/media`) | Your library. Root folders are chosen inside it; see First run. Partial downloads live in a hidden `.riparr-partial` folder in each root folder. |
 
-Files are created as `PUID`:`PGID` with the given `UMASK`, so Sonarr, Radarr and your media server can read them.
-
-## Ports
-
-| Port | Purpose |
-| --- | --- |
-| 7676 | Web UI and REST API |
-| 9666 | Click'n'Load listener. Only needed if you push links from a browser; see [Click'n'Load](user-guide.md#clicknload). |
-
-## Environment variables
-
-See the [configuration reference](configuration.md#environment-variables) for the full list. The most common ones:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `PUID` / `PGID` | `1000` | Owner of created files |
-| `UMASK` | `002` | File creation mask |
-| `RIPARR_PROXY_URL` | (unset) | Proxy for container sites, e.g. `http://gluetun:8888` |
-| `RIPARR_AUTH` | (unset) | `none` disables login, for recovery |
-
-## Behind a VPN or proxy
-
-Some networks block particular container sites, for example by filtering on the site name. Riparr can send its requests to those sites through a proxy while downloads stay on your normal connection.
-
-### You already run gluetun
-
-gluetun must have `HTTPPROXY=on`. Join Riparr to gluetun's Docker network with the bundled override:
-
-```sh
-docker compose -f docker-compose.yml -f docker-compose.existing-gluetun.yml up -d
-```
-
-The override expects the gluetun container to be named `gluetun` and its network to be `vpn_proxy`. Set `GLUETUN_NETWORK` if your network is called something else.
-
-### Start a gluetun for NordVPN
-
-Put your NordVPN **service credentials** (not your account email and password) in `.env`:
-
-```sh
-cp .env.example .env   # NORDVPN_USER, NORDVPN_PASSWORD, NORDVPN_COUNTRY
-docker compose -f docker-compose.yml -f docker-compose.vpn.yml up -d
-```
-
-Service credentials are on the Nord dashboard under *Set up NordVPN manually*. Any other provider gluetun supports works with the same pattern.
-
-Once it's running, **Settings → Integrations → Test proxy** confirms that requests leave through the VPN; the IP it reports should differ from your direct one. See [Proxy](user-guide.md#proxy-and-vpn) for scopes and SOCKS5.
+Files are created as `PUID`:`PGID` with the given `UMASK`, so Plex, Jellyfin and your *arr apps can read them.
 
 ## First run
 
 1. **Create your login** on the setup page.
-2. **Settings → Downloads:** check the concurrency limits, the free-space floor (default 5 GB) and the **preferred hosts** order.
-3. **Settings → Integrations:** add a notification target (webhook, Discord or Apprise) and send a test.
-4. **Containers → Add container:** paste a container URL and choose a target directory.
+2. **Settings → Media Management:** add your **root folders**, the library folders as seen inside the container (e.g. `/media/Kdrama`, `/media/Movies`). The folder browser lists what's mounted. Then pick the default root folder for new shows and movies, and whether new shows get season folders.
+3. **Settings → Connections:** add your **TMDB API key** (free from themoviedb.org) so adding a title can search TMDB and show posters and episode counts. If you use them, add your FlareSolverr URL and proxy URL here too. Each field has a **Test** button.
+4. **Settings → Downloads:** check the download limits, the free-space floor (default 5 GB per root folder) and the **preferred hosts** order.
+5. **Settings → Notifications:** add a webhook (Discord works) or an Apprise URL, and send a test.
+6. **Add title:** search TMDB, choose the root folder and season folders, then paste the title's container page(s) as sources.
+
+Files land at `<root folder>/<title folder>/Season 01/<file>`, where Plex and Jellyfin pick them up on their next scan.
+
+## Using your existing gluetun and FlareSolverr
+
+Riparr doesn't start its own VPN or FlareSolverr. You enter their URLs in **Settings → Connections**. One thing to get right is Docker networking: inside Riparr's container, `127.0.0.1` is Riparr itself, not the host. So either:
+
+- **Join their network (recommended).** Then use their container names, e.g. `http://gluetun:8888` and `http://flaresolverr:8191`. For a gluetun on a network called `vpn_proxy`:
+  ```sh
+  docker compose -f docker-compose.yml -f docker-compose.existing-gluetun.yml up -d
+  ```
+  Set `GLUETUN_NETWORK` if your network has another name. The override also sets `RIPARR_PROXY_URL=http://gluetun:8888`.
+- **Or use the host's address** where those services publish their ports, e.g. `http://192.168.1.10:8888`.
+
+gluetun needs `HTTPPROXY=on` for its proxy. **Test proxy** shows the exit IP, so you can confirm requests leave through the VPN.
+
+The proxy covers container sites only by default. Your downloads keep using your normal connection unless you switch the scope to *Everything*.
 
 ## Health check
 
-The image has a Docker `HEALTHCHECK` that calls `/api/health` (no login needed). It reports unhealthy if the web server, the database or the worker stops responding.
+The image has a Docker `HEALTHCHECK` that calls `/api/health` (no login needed). It reports unhealthy if the web server, the database or the worker stops responding. **System → Status** shows the same information in the UI.
 
 ## Upgrading
 
 ```sh
 git pull
-docker compose up -d --build
+npm run release
+docker compose up -d
 ```
 
-Database migrations run automatically when the new version starts. Back up `/config` first; see below.
+Riparr backs up the database to `/config/backups/riparr-v<old version>-<date>.db` and then upgrades it automatically, keeping your titles, sources, history and settings. The newest 5 backups are kept, and **System → Backups** lists them.
 
-## Backups
-
-All state is in `/config/riparr.db`. Stop the container, or use SQLite's backup command, then copy the file:
+**Rolling back:** retag the previous image and restart, then restore the matching backup (see below):
 
 ```sh
-sqlite3 /path/to/config/riparr.db ".backup '/backups/riparr-$(date +%F).db'"
+docker tag riparr:<previous version> riparr:latest
+docker compose up -d
 ```
 
-Downloaded files are already in your media folders and don't need Riparr to stay usable.
+## Backups and restore
+
+- **Back up now** under **System → Backups**, or copy `/config/riparr.db` while Riparr is stopped.
+- **Restore:**
+  1. Stop Riparr (`docker compose stop riparr`).
+  2. Copy the backup over `/config/riparr.db`.
+  3. Delete `riparr.db-wal` and `riparr.db-shm` if they're there.
+  4. Start it again.
+
+Downloaded files are already in your library and don't depend on Riparr.
 
 ## Locked out
 
 Start the container with `RIPARR_AUTH=none`, sign in without a password, set a new password under **Settings → Security**, then remove the variable and restart.
+
+## Upgrading from a pre-v1 install
+
+Older versions downloaded into a `/downloads` volume and tracked "containers". On first start the new version:
+- turns each container into a title with one source, keeping its links and history;
+- makes the old downloads folder its first root folder.
+
+Keep the old `/downloads` mount until you've moved those titles to your new root folders (Edit title), or files for them will have nowhere to go.
