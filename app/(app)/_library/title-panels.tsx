@@ -1,13 +1,14 @@
 // Tab panels of the title page (server components; forms post to the title Server Actions).
 import Link from "next/link";
 import { CircleAlert, CircleCheck, FolderOpen, History, Info, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import type { DiskFile } from "@/lib/disk-scan";
 import type { RiparrEvent } from "@/lib/events";
 import type { ExtractionRow } from "@/lib/links";
 import type { SourceWithTitle } from "@/lib/sources";
 import type { TitleWithStats } from "@/lib/titles";
 import { Card, EmptyState, HostChip, ProgressBar, StatusPill, episodeLabel, formatAgo, formatBytes, type PillState } from "../_kit";
 import { siteOf, type EpisodeRow, type FileView } from "../_data/progress";
-import { checkSourceNow, removeSource, retryExtractions, toggleSource } from "../titles/actions";
+import { checkSourceNow, removeSource, rescanTitle, retryExtractions, toggleSource } from "../titles/actions";
 import { EpisodePill, PathText, SourceDot, sourceTone } from "./ui";
 import { hostLabelOf } from "./host-label";
 
@@ -15,8 +16,25 @@ const pct = (f: FileView) => (f.size ? Math.min(100, Math.round((f.bytes_done / 
 
 function FilePill({ file, type, now }: { file: FileView | null; type: TitleWithStats["type"]; now: number }) {
   if (!file) return <EpisodePill state="missing" now={now} />;
-  return <EpisodePill state={file.state} type={type} percent={pct(file)} hostLabel={hostLabelOf(file.host)} until={file.until} now={now} />;
+  return (
+    <EpisodePill
+      state={file.state}
+      type={type}
+      percent={pct(file)}
+      hostLabel={hostLabelOf(file.host)}
+      until={file.until}
+      inFolder={file.status === "skipped"}
+      now={now}
+    />
+  );
 }
+
+/** Why an episode is missing: no source lists it, or only on hosts Riparr can't download from. */
+function missingText(unsupported: string[]) {
+  return unsupported.length ? `Only on hosts Riparr can't download from: ${unsupported.join(", ")}` : "Not on any source yet";
+}
+
+const baseName = (p: string) => p.slice(p.lastIndexOf("/") + 1);
 
 /** Grid row shared by the episode and file lists: stacks on phones, columns from 860px. */
 const ROW = "grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 px-4 py-3 md:grid-cols-[44px_minmax(0,1fr)_170px_110px_80px] md:items-center md:gap-4 md:px-5";
@@ -68,7 +86,7 @@ export function EpisodesPanel({ title, rows, extras, now }: { title: TitleWithSt
     <div className="space-y-3.5">
       {[...seasons.entries()].map(([season, eps]) => {
         const done = eps.filter((e) => e.state === "done");
-        const bytes = done.reduce((n, e) => n + (e.file?.size ?? 0), 0);
+        const bytes = done.reduce((n, e) => n + (e.file?.size ?? e.disk?.size ?? 0), 0);
         return (
           <Card
             key={season}
@@ -93,15 +111,24 @@ export function EpisodesPanel({ title, rows, extras, now }: { title: TitleWithSt
                   <span className="hidden text-[13px] tabular-nums text-muted md:block">{String(e.episode).padStart(2, "0")}</span>
                   <div className="col-span-2 min-w-0 md:col-span-1">
                     <div className="text-sm font-medium tabular-nums text-fg">{episodeLabel(e.season, e.episode)}</div>
-                    <FileLine file={e.file} missingText="Not on any source yet" />
-                    <Copies copies={e.copies} shown={e.file} />
+                    {e.disk ? (
+                      <div className="truncate font-mono text-[11.5px] text-muted" title={e.disk.path}>
+                        {baseName(e.disk.path)}
+                      </div>
+                    ) : (
+                      <FileLine file={e.file} missingText={missingText(e.unsupported)} />
+                    )}
+                    {e.disk && <div className="mt-1 text-xs text-faint">Already in the folder; Riparr won&apos;t download it</div>}
+                    {!e.disk && <Copies copies={e.copies} shown={e.file} />}
                   </div>
                   <div>
-                    <FilePill file={e.file} type="show" now={now} />
+                    {e.disk ? <EpisodePill state="done" inFolder now={now} /> : <FilePill file={e.file} type="show" now={now} />}
                   </div>
-                  <div className="justify-self-end md:justify-self-start">{e.file ? <HostChip host={e.file.host} /> : <span className="text-xs text-faint">None</span>}</div>
+                  <div className="justify-self-end md:justify-self-start">
+                    {e.file ? <HostChip host={e.file.host} /> : <span className="text-xs text-faint">{e.disk ? "Folder" : "None"}</span>}
+                  </div>
                   <div className="col-span-2 text-xs tabular-nums text-muted md:col-span-1 md:text-right md:text-[13px] md:text-fg-2">
-                    {e.file?.size ? formatBytes(e.file.size) : <span className="text-faint">–</span>}
+                    {e.file?.size || e.disk ? formatBytes(e.file?.size ?? e.disk!.size) : <span className="text-faint">–</span>}
                   </div>
                 </li>
               ))}
@@ -283,17 +310,22 @@ const ARCHIVE: Record<ExtractionRow["status"], { state: PillState; label: string
 export function FilesPanel({
   title,
   files,
+  disk,
   archives,
   freeBytes,
   now,
 }: {
   title: TitleWithStats;
   files: FileView[];
+  /** Video files already in the folder that Riparr didn't download. */
+  disk: DiskFile[];
   archives: ExtractionRow[];
   freeBytes: number | null;
   now: number;
 }) {
   const onDisk = files.filter((f) => f.state === "done" && f.local_path).sort((a, b) => (a.local_path! < b.local_path! ? -1 : 1));
+  const listed = new Set(onDisk.map((f) => f.local_path));
+  const inFolder = disk.filter((d) => !listed.has(d.path));
   const bytes = onDisk.reduce((n, f) => n + (f.size ?? f.bytes_done), 0);
   const dir = `${title.root_path}/${title.folder}`;
   const failed = archives.some((a) => a.status === "failed" || a.status === "wrong_password");
@@ -337,6 +369,37 @@ export function FilesPanel({
             </span>
           )}
         </div>
+      </Card>
+
+      <Card
+        title="Already in the folder"
+        action={
+          <form action={rescanTitle}>
+            <input type="hidden" name="id" value={title.id} />
+            <button className="btn h-9 min-h-0 px-3 text-[13px]">
+              <RefreshCw size={15} strokeWidth={1.75} aria-hidden="true" />
+              Rescan folder
+            </button>
+          </form>
+        }
+        bodyClassName=""
+      >
+        <p className="px-4 py-3 text-[13px] text-muted md:px-5">
+          Video files Riparr didn&apos;t download, e.g. episodes you had before adding the title. They count as on disk, so Riparr
+          doesn&apos;t download them again.{" "}
+          {title.disk_scanned_at ? `Last scanned ${formatAgo(title.disk_scanned_at, now)}.` : "Not scanned yet."}
+        </p>
+        {inFolder.length > 0 && (
+          <ul className="divide-y divide-border border-t border-border">
+            {inFolder.map((d) => (
+              <li key={d.path} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-4 py-3 md:grid-cols-[minmax(0,1fr)_110px_80px] md:items-center md:gap-4 md:px-5">
+                <span className="col-span-2 font-mono text-xs text-fg-2 [overflow-wrap:anywhere] md:col-span-1">{d.path}</span>
+                <span className="text-xs tabular-nums text-muted">{d.episode != null ? episodeLabel(d.season ?? 1, d.episode) : ""}</span>
+                <span className="justify-self-end text-xs tabular-nums text-muted md:text-right md:text-[13px] md:text-fg-2">{formatBytes(d.size)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </Card>
 
       {archives.length > 0 && (

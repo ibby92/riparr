@@ -362,6 +362,19 @@ export const MIGRATIONS: Migration[] = [
     ALTER TABLE files ADD COLUMN blocked_notified_at INTEGER;
     CREATE INDEX links_host ON links(host);
   `,
+  // Video files already in a title's folder (put there by hand or before Riparr), found by lib/disk-scan.ts.
+  `
+    CREATE TABLE disk_files (
+      title_id INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
+      path     TEXT    NOT NULL, -- absolute
+      size     INTEGER NOT NULL,
+      season   INTEGER,
+      episode  INTEGER,
+      mtime    INTEGER NOT NULL,
+      PRIMARY KEY (title_id, path)
+    ) WITHOUT ROWID;
+    ALTER TABLE titles ADD COLUMN disk_scanned_at INTEGER;
+  `,
 ];
 
 /** Latest schema version (number of migrations). */

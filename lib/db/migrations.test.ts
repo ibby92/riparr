@@ -153,3 +153,19 @@ describe("migration 9 (host limits, stalls, usage)", () => {
     expect(() => db.exec("INSERT INTO host_usage (host, day) VALUES ('mega', '2026-10-10')")).toThrow();
   });
 });
+
+describe("migration 10 (files already on disk)", () => {
+  it("adds disk_files and titles.disk_scanned_at, cascading with the title", () => {
+    const db = databaseAt(9);
+    db.exec(`
+      INSERT INTO root_folders (id, path, created_at) VALUES (1, '/srv/media', 1);
+      INSERT INTO titles (id, type, name, root_folder_id, folder, created_at, updated_at) VALUES (1, 'show', 'X', 1, 'X', 1, 1);
+    `);
+    migrate(db);
+    expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length });
+    expect({ ...db.prepare("SELECT name, disk_scanned_at FROM titles WHERE id = 1").get() }).toEqual({ name: "X", disk_scanned_at: null });
+    db.exec("INSERT INTO disk_files (title_id, path, size, season, episode, mtime) VALUES (1, '/srv/media/X/X.E01.mkv', 5, 1, 1, 1)");
+    db.exec("PRAGMA foreign_keys = ON; DELETE FROM titles WHERE id = 1");
+    expect(db.prepare("SELECT COUNT(*) AS n FROM disk_files").get()).toEqual({ n: 0 });
+  });
+});

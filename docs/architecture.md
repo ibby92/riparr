@@ -32,7 +32,7 @@ Riparr is two processes that share one SQLite database:
 
   It also hosts the Click'n'Load HTTP listener and writes a heartbeat to `settings` every 5 seconds.
 
-The two processes never call each other. The UI writes rows directly, for example adding a title or retrying a link. For anything that touches running work, it puts a command in the `commands` table (`lib/commands.ts`): `check_now` (one source), `check_title`, `cancel_link`, `cancel_title` or `extract_title`. The worker claims commands in a transaction.
+The two processes never call each other. The UI writes rows directly, for example adding a title or retrying a link. For anything that touches running work, it puts a command in the `commands` table (`lib/commands.ts`): `check_now` (one source), `check_title`, `cancel_link`, `cancel_title`, `extract_title` or `scan_title`. The worker claims commands in a transaction.
 
 `docker/entrypoint.sh` runs both processes under `tini` and `gosu` as `PUID`:`PGID`. If either exits, the container exits, so the restart policy can recover.
 
@@ -102,6 +102,8 @@ flowchart TD
 
      The best copy is queued and the rest go on standby.
 
+   Before planning, `coveredByDisk` (`lib/mirrors.ts`, pure) marks pending copies `skipped` when the title's folder already has that episode (or, for a movie, a video file) that Riparr didn't download; see *Folder scans* below.
+
    Running it again on its own output is a no-op; property tests check this.
 3. **Download.** Links with `queued` files go through a per-host `PQueue` and then a global `PQueue`, in that order, so one busy host can't take every slot. `downloadLink` re-resolves the link for fresh download handles, then calls `downloadFile` (`lib/download.ts`) for each file:
    - partial data goes to `<root>/.riparr-partial/<fileId>.part`, on the same filesystem as the destination;
@@ -111,6 +113,10 @@ flowchart TD
    - the finished file moves atomically to `fileDestination()` (`lib/titles.ts`): `<root>/<folder>/[Season NN/]<naming>`, kept inside the root by `resolveInside`.
 4. **Settle.** A link whose files are all done, skipped or covered becomes `done`, or `mirror` if none of its own files were used. That triggers the notifications and `linkSettled()`.
 5. **Extract** (`worker/extract-runner.ts`). When a title has no pending links, every folder it wrote to is scanned for archive sets (`worker/extract.ts` `findArchiveSets`). Each set is extracted with 7-Zip, one at a time, and recorded in `extractions`. Extraction waits for the title to settle because 7-Zip misreports sets with parts still downloading.
+
+### Folder scans
+
+`lib/disk-scan.ts` `scanTitle()` walks `<root>/<folder>` (hidden entries skipped, 3 levels deep) for video files and stores them in `disk_files` with the season and episode parsed from the name. The worker scans a title on the `scan_title` command (sent when a title is added or edited, and by **Rescan folder**), when a check finds new links, before the first mirror selection of a title never scanned, and every 30 minutes (a few titles per tick). `externalDiskFiles()` returns the files no `done` file row points at; those are what count as already on disk, in the pipeline and in the UI. If the root folder is missing, the previous scan's rows are kept.
 
 ### Failure handling
 
@@ -172,6 +178,7 @@ A source is `pending` → `ok` | `needs_attention` | `error`. A title's status r
 | `extractions` | One row per archive set (absolute `entry_path`): result and error |
 | `host_status` | Per-host cooldown (`limited_until`, reason) and last success/error |
 | `host_usage` | Bytes per host per UTC day, for the dashboard chart and the sidebar |
+| `disk_files` | Video files found in each title's folder by the last scan (`titles.disk_scanned_at`) |
 | `settings` | Key/value JSON: app settings, auth (password hash, session secret, credential version), API key, worker heartbeat, disk status |
 | `host_accounts` | Per-host credentials as JSON |
 | `events` | Activity log (per title), pruned after 30 days |

@@ -32,13 +32,14 @@ Two processes share one SQLite database (`/config/riparr.db`, WAL):
 - **Web** (`app/`, Next.js 16 App Router with `cacheComponents`): UI pages, Server Actions, REST API (`app/api/v1`), and `proxy.ts` (Next 16's renamed middleware) for auth.
 - **Worker** (`worker/index.ts`, bundled by esbuild): a 2-second tick loop. Each tick processes commands from the UI, runs due source checks, and runs the download pipeline. It also serves the Click'n'Load listener on :9666.
 
-The UI never calls the worker directly. It writes rows and sends commands through the `commands` table (`lib/commands.ts`: `check_now` (source), `check_title`, `cancel_link`, `cancel_title`, `extract_title`), which the worker claims each tick. Worker liveness is a heartbeat row in `settings`.
+The UI never calls the worker directly. It writes rows and sends commands through the `commands` table (`lib/commands.ts`: `check_now` (source), `check_title`, `cancel_link`, `cancel_title`, `extract_title`, `scan_title`), which the worker claims each tick. Worker liveness is a heartbeat row in `settings`.
 
 ### Data model (schema v1, `lib/db/migrations.ts`)
 
 - `root_folders` (absolute paths inside the container, e.g. `/media/Kdrama`) ← `titles` (type show/movie, TMDB fields, `folder`, `season_folders`, `naming`, `monitored`) ← `sources` (container URL, password, poll settings, status).
 - `links` belong to a title (unique per `(title_id, fingerprint)`, so two sites listing the same host link share one) and remember the `source_id` that found them. `files` belong to links and carry `season`/`episode`.
 - `host_status` / `host_usage`: host-wide cooldowns and per-day bytes (`lib/host-status.ts`). `lib/queue.ts` builds the Queue page's read model.
+- `disk_files`: video files found in each title's folder (`lib/disk-scan.ts`). Ones Riparr didn't download (`externalDiskFiles`) count as on disk: mirror selection marks pending copies of those episodes `skipped` (`coveredByDisk`), and the UI shows them as *In folder*.
 - Repos: `lib/titles.ts`, `lib/sources.ts`, `lib/root-folders.ts`, `lib/links.ts`.
 
 ### Data flow

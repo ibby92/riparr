@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FileStatus, LinkStatus } from "./links";
-import { groupMirrors, hostRank, planMirrors, type MirrorCandidate, type MirrorPlan } from "./mirrors";
+import { coveredByDisk, groupMirrors, hostRank, planMirrors, type MirrorCandidate, type MirrorPlan } from "./mirrors";
 
 const NOW = 1_000_000;
 const PRIO = ["pixeldrain", "gofile", "mega"];
@@ -385,5 +385,33 @@ describe("planMirrors: idempotency (property)", () => {
         }
       }
     }
+  });
+});
+
+describe("coveredByDisk", () => {
+  const file = (fileId: number, name: string, season: number | null, episode: number | null, fileStatus: "standby" | "queued" | "downloading" | "done" = "queued", linkId = fileId) =>
+    ({ fileId, linkId, name, season, episode, fileStatus });
+  const disk = (p: string, season: number | null, episode: number | null, size = 1) => ({ path: p, size, season, episode });
+
+  it("covers a show's pending copies of episodes already on disk", () => {
+    const files = [file(1, "S.S01E01.mkv", 1, 1), file(2, "S.S01E01.mkv", 1, 1, "standby"), file(3, "S.S01E02.mkv", 1, 2), file(4, "S.E03.mkv", null, 3)];
+    expect(coveredByDisk(files, [disk("/m/S/mine E01.mkv", 1, 1), disk("/m/S/S.E03.mkv", null, 3)], "show")).toEqual([
+      { fileId: 1, path: "/m/S/mine E01.mkv" },
+      { fileId: 2, path: "/m/S/mine E01.mkv" },
+      { fileId: 4, path: "/m/S/S.E03.mkv" },
+    ]);
+  });
+
+  it("leaves downloading, finished and busy files, other seasons and files without an episode alone", () => {
+    const files = [file(1, "a", 1, 1, "downloading"), file(2, "b", 1, 1, "done"), file(3, "c", 1, 1, "queued", 99), file(4, "d", 2, 1), file(5, "extras.mkv", null, null)];
+    expect(coveredByDisk(files, [disk("/m/S/x.mkv", 1, 1)], "show", new Set([99]))).toEqual([]);
+  });
+
+  it("covers a movie's pending video files with the largest video in its folder", () => {
+    const files = [file(1, "Movie.2019.1080p.mkv", null, null), file(2, "Movie.2019.part1.rar", null, null)];
+    expect(coveredByDisk(files, [disk("/m/Movie/sample.mkv", null, null, 5), disk("/m/Movie/Movie.mkv", null, null, 500)], "movie")).toEqual([
+      { fileId: 1, path: "/m/Movie/Movie.mkv" },
+    ]);
+    expect(coveredByDisk(files, [], "movie")).toEqual([]);
   });
 });

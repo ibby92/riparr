@@ -59,7 +59,7 @@ The title page shows progress (downloaded, in progress, waiting, missing) and ha
 
 - **Episodes:** each episode by season, with status, host and size. "Also on gofile" means a mirror exists. Movies show their files instead.
 - **Sources:** each source page with its last check, next check, links found and status, plus every link with **Retry** and **Ignore**.
-- **Files:** what's on disk, and the archives Riparr extracted.
+- **Files:** what Riparr downloaded, what was [already in the folder](#episodes-already-in-the-folder) (with **Rescan folder**), and the archives Riparr extracted.
 - **History:** this title's activity.
 
 **Check now** checks every source of the title straight away. **Pause** / **Resume** toggles monitoring. **Edit** changes the title's settings; moving a title to another root folder or folder only affects files downloaded afterwards. **Delete title** (at the bottom of Edit) removes the title, its sources and its history from Riparr; files already downloaded stay on disk.
@@ -67,6 +67,14 @@ The title page shows progress (downloaded, in progress, waiting, missing) and ha
 ### Episodes
 
 Riparr reads the season and episode from the source's metadata when it has them, otherwise from the file name: `S01E05`, `1x05`, or an episode marker on its own such as `E05`, `EP05` or `Episode 5` (season 1 is assumed). Files without a marker are listed under **Other files**. Shows with season folders put a file in `Season NN` only when its season is known.
+
+An episode that no source offers on gofile, pixeldrain or MEGA shows as *Missing* with the hosts it is on, e.g. "Only on hosts Riparr can't download from: send.now, vikingfile.com". It's picked up if a supported copy appears later.
+
+### Episodes already in the folder
+
+Riparr scans each title's folder for video files it didn't download itself: episodes you had before adding the title, or files you copied in by hand. It reads the episode number from the file name the same way (a bare `EP05` inside a `Season 02` folder is S02E05). Those episodes count as on disk, show as **In folder**, and aren't downloaded again, even if a source offers them under a different name. For a movie, any video file in its folder counts.
+
+The folder is scanned when a title is added or edited, when a check finds new links, and every 30 minutes. **Files → Rescan folder** scans it right away. Hidden files and folders (such as `.riparr-partial`) are skipped. If the root folder itself is unreachable (e.g. an unmounted share), the last scan is kept so episodes don't suddenly look missing.
 
 ### Naming templates
 
@@ -191,7 +199,12 @@ Different qualities (720p and 1080p) are different files, so both are downloaded
 - **Queued:** waiting for a free download slot.
 - **Standby copies:** mirrors kept in reserve.
 
-The sidebar shows the same host states and free space on every page, and the dashboard shows what's downloading and a 14-day chart of transfer per host.
+The sidebar shows the same host states and free space on every page. The dashboard shows what's downloading and a **Downloads** card:
+
+- **This week:** data transferred in the last 7 days, the change against the week before, how many episodes and titles came in, and each host's share, beside a 14-day trend line.
+- **Arrivals:** one column per day (the last 14, or 7 on a phone) listing the episodes that finished, edged in their host's colour. Click one to open its title.
+
+Data figures everywhere (dashboard, sidebar, Queue) count bytes actually transferred from each host per day, in your time zone. So they include retried or restarted downloads and titles you've since deleted, and can be larger than the files you kept. Episodes found already in a folder aren't counted as downloads.
 
 ### Host cooldowns
 

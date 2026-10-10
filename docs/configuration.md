@@ -105,6 +105,7 @@ These aren't configurable, but are useful to know:
 | Failed source checks | Interval doubles per consecutive failure, capped at 6 h; ±10 % jitter on every schedule |
 | Container site rate limit | Next check after the site's `Retry-After` (default 15 min) |
 | Free-space check | Every 30 s per root folder |
+| Title folder rescan | When a title is added or edited, after a check finds new links, and every 30 minutes |
 | Database backups | Before every upgrade, in `/config/backups`; the newest 5 are kept |
 | Activity log retention | 30 days |
 | Login throttle | 10 failures per IP per 15 minutes |

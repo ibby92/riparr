@@ -18,6 +18,8 @@ export function proxy(req: NextRequest) {
   if (needsSetup()) {
     return pathname === "/setup" ? NextResponse.next() : NextResponse.redirect(new URL("/setup", req.url));
   }
+  // The account exists: setup has nothing to do.
+  if (pathname === "/setup") return NextResponse.redirect(new URL(sessionUser ? "/" : "/login", req.url));
   if (PUBLIC_PAGES.includes(pathname)) {
     return sessionUser ? NextResponse.redirect(new URL("/", req.url)) : NextResponse.next();
   }

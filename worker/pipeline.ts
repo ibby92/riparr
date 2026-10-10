@@ -1,4 +1,3 @@
-import path from "node:path";
 import PQueue from "p-queue";
 import { downloadFile } from "@/lib/download";
 import { HostOfflineError, NeedsAttentionError, RateLimitError, StallError } from "@/lib/errors";
@@ -40,7 +39,8 @@ import {
   type Link,
   type TitleFile,
 } from "@/lib/links";
-import { groupMirrors, planMirrors } from "@/lib/mirrors";
+import { coveredByDisk, groupMirrors, planMirrors } from "@/lib/mirrors";
+import { externalDiskFiles, scanTitle } from "@/lib/disk-scan";
 import { fetchFor } from "@/lib/net";
 import { notify } from "@/lib/notify";
 import { parseEpisode } from "@/lib/episodes";
@@ -49,11 +49,11 @@ import { getSource, titlePasswords } from "@/lib/sources";
 import { fileDestination, getTitle, type TitleWithStats } from "@/lib/titles";
 import { getSettings } from "@/lib/settings";
 import { diskIsLow } from "./disk";
+import { PARTIAL_DIR, partialPathFor } from "./partials";
 import { linkSettled } from "./extract-runner";
 
 const MINUTE = 60_000;
 const MAX_ATTEMPTS = 5;
-const PARTIAL_DIR = ".riparr-partial";
 const PROGRESS_WRITE_MS = 1_000;
 const RESOLVE_CONCURRENCY = 4;
 /** A stalled download retries soon: the partial is kept and the host is usually fine. */
@@ -145,7 +145,15 @@ export function selectAndSettle(titleId: number, now = clock.now()) {
   // Wait until every freshly found link is resolved, so a quick host doesn't win by default.
   if (resolvingInProgress(titleId)) return;
   const priority = getSettings().hostPriority;
-  const files = titleFiles(titleId);
+  let files = titleFiles(titleId);
+  // Episodes already in the folder (from before Riparr, or added by hand) aren't downloaded again.
+  const title = getTitle(titleId);
+  if (title && files.some((f) => f.fileStatus === "standby" || f.fileStatus === "queued")) {
+    if (title.disk_scanned_at === null) scanTitle(titleId);
+    const onDisk = coveredByDisk(files, externalDiskFiles(titleId), title.type, new Set(jobs.keys()));
+    for (const c of onDisk) updateFile(c.fileId, { status: "skipped", local_path: c.path });
+    if (onDisk.length) files = titleFiles(titleId);
+  }
   const plan = planMirrors(files, priority, now);
   setFileStatuses(plan.promote, "queued");
   setFileStatuses(plan.standby, "standby");
@@ -200,7 +208,12 @@ function settleLinks(titleId: number, covered: Set<number>) {
 
     const downloaded = files.filter((f) => f.status === "done" || f.status === "skipped");
     const link = getLink(linkId)!;
-    if (downloaded.length) {
+    if (downloaded.length && downloaded.every((f) => f.status === "skipped")) {
+      // Nothing transferred: the files were already in the title's folder.
+      setLinkStatus(linkId, "done", { attempts: 0 });
+      const names = downloaded.length === 1 ? downloaded[0].name : `${downloaded.length} files`;
+      logEvent("info", `Already in the folder, not downloaded: ${names}`, titleId);
+    } else if (downloaded.length) {
       setLinkStatus(linkId, "done", { attempts: 0 });
       const names = downloaded.length === 1 ? downloaded[0].name : `${downloaded.length} files`;
       const viaMirrors = downloaded.length < files.length ? ` (${files.length - downloaded.length} from other hosts)` : "";
@@ -306,7 +319,7 @@ async function downloadOne(title: TitleWithStats, link: Link, row: FileRow, file
     date: new Date(link.discovered_at),
   });
   // Partials live on the same root folder, so the final move is an atomic rename.
-  const partialPath = resolveInside(title.root_path, path.posix.join(PARTIAL_DIR, `${fileId}.part`));
+  const partialPath = partialPathFor(resolveInside(title.root_path, PARTIAL_DIR), fileId, link.url, row.key, row.bytes_done);
 
   updateFile(fileId, { status: "downloading", error: null });
   const settings = getSettings();

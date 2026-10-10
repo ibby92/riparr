@@ -3,13 +3,13 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { ArrowDown, ArrowUp, FolderPlus, Gauge, HardDrive, HardDriveDownload, Layers, Plus, Tv } from "lucide-react";
 import { activeLinks, totalSpeed, type LinkWithProgress } from "@/lib/links";
-import { listRootFolders } from "@/lib/root-folders";
+import { diskTotals, listRootFolders } from "@/lib/root-folders";
 import { readDiskStatus } from "@/lib/settings";
 import { listTitles } from "@/lib/titles";
 import { Card, EmptyState, HostChip, PageHeader, ProgressBar, StatCard, formatBytes, formatDuration } from "./_kit";
 import { downloadsByDay, weekStats } from "./_data/dashboard";
 import { allTitleProgress, sourcesByTitle } from "./_data/progress";
-import { DownloadsChart } from "./_library/downloads-chart";
+import { DownloadsActivity } from "./_library/downloads-activity";
 import { TitleCard } from "./_library/title-card";
 import { AutoRefresh } from "./auto-refresh";
 
@@ -119,11 +119,12 @@ async function DashboardContent() {
 
   const disk = readDiskStatus();
   const lowPaths = new Set(disk?.roots.filter((r) => r.low).map((r) => r.path) ?? []);
-  const known = roots.filter((r) => r.free_bytes != null);
-  const free = known.reduce((n, r) => n + (r.free_bytes ?? 0), 0);
-  const size = known.reduce((n, r) => n + (r.total_bytes ?? 0), 0);
+  // Several root folders on one disk share its free space: count each disk once.
+  const totals = diskTotals(roots);
+  const free = totals?.free ?? 0;
+  const size = totals?.total ?? 0;
   const low = roots.some((r) => lowPaths.has(r.path));
-  const [freeValue, freeUnit] = splitBytes(known.length ? free : null);
+  const [freeValue, freeUnit] = splitBytes(totals ? free : null);
 
   const waitingHosts = new Set([...progress.values()].flatMap((p) => (p.waitingHost ? [p.waitingHost.label] : [])));
   const summary = [
@@ -229,7 +230,7 @@ async function DashboardContent() {
                   {low
                     ? "Low on space: new downloads are paused"
                     : size > 0
-                      ? `${formatBytes(size - free)} of ${formatBytes(size)} used${roots.length > 1 ? ` · ${roots.length} folders` : ""}`
+                      ? `${formatBytes(size - free)} of ${formatBytes(size)} used${totals && totals.disks > 1 ? ` · ${totals.disks} disks` : ""}`
                       : "Folder not reachable"}
                 </span>
               </span>
@@ -272,7 +273,7 @@ async function DashboardContent() {
 
       {downloading.length > 0 && <DownloadingNow links={downloading} total={links.length} />}
 
-      <DownloadsChart days={chart.days} hosts={chart.hosts} />
+      <DownloadsActivity days={chart.days} hosts={chart.hosts} week={week} />
     </div>
   );
 }

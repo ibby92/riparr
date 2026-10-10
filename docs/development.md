@@ -11,6 +11,8 @@ npm run dev        # next dev (:3000) + worker in watch mode, together
 
 Development data goes in `./config` (git-ignored; `RIPARR_CONFIG_DIR` overrides it). Add a root folder under Settings → Media Management, e.g. the absolute path of `./downloads` (git-ignored), before adding titles. To run only one side: `npm run dev:web` or `npm run worker`.
 
+The dev server works from other devices on your network: `next.config.ts` allows this machine's own addresses (Next 16 otherwise blocks its dev resources for anything but `localhost`). To open it under another name, such as a DNS name or reverse proxy, list it in `RIPARR_DEV_ORIGINS` (comma-separated) and restart `npm run dev`.
+
 > **Next.js 16:** APIs and conventions differ from older versions; for example, middleware is now `proxy.ts`, and `cacheComponents` changes how data fetching renders. Read the guides bundled in `node_modules/next/dist/docs/` before writing Next-specific code. `AGENTS.md` says the same.
 
 ## Commands

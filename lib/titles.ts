@@ -22,6 +22,8 @@ export type Title = {
   season_folders: number;
   naming: string;
   monitored: number;
+  /** When lib/disk-scan.ts last looked at the title's folder. */
+  disk_scanned_at: number | null;
   created_at: number;
   updated_at: number;
 };
@@ -34,7 +36,7 @@ export type TitleWithStats = Title & {
   source_count: number;
   link_count: number;
   done_count: number;
-  /** Distinct episodes with a downloaded file. */
+  /** Distinct episodes with a downloaded file, or already in the folder. */
   episodes_done: number;
   /** Distinct episodes seen in any source. */
   episodes_seen: number;
@@ -86,8 +88,12 @@ const STATS = `
          (SELECT COUNT(*) FROM sources s WHERE s.title_id = t.id) AS source_count,
          (SELECT COUNT(*) FROM links l WHERE l.title_id = t.id) AS link_count,
          (SELECT COUNT(*) FROM links l WHERE l.title_id = t.id AND l.status = 'done') AS done_count,
-         (SELECT COUNT(DISTINCT f.season || 'x' || f.episode) FROM files f JOIN links l ON l.id = f.link_id
-           WHERE l.title_id = t.id AND f.episode IS NOT NULL AND f.status IN ('done', 'skipped')) AS episodes_done,
+         (SELECT COUNT(*) FROM (
+            SELECT COALESCE(f.season, 1) AS s, f.episode AS e FROM files f JOIN links l ON l.id = f.link_id
+             WHERE l.title_id = t.id AND f.episode IS NOT NULL AND f.status IN ('done', 'skipped')
+            UNION
+            SELECT COALESCE(d.season, 1), d.episode FROM disk_files d WHERE d.title_id = t.id AND d.episode IS NOT NULL
+          )) AS episodes_done,
          (SELECT COUNT(DISTINCT f.season || 'x' || f.episode) FROM files f JOIN links l ON l.id = f.link_id
            WHERE l.title_id = t.id AND f.episode IS NOT NULL) AS episodes_seen,
          (SELECT MAX(s.last_checked_at) FROM sources s WHERE s.title_id = t.id) AS last_checked_at,

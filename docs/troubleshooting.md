@@ -76,6 +76,14 @@ The page's Click'n'Load data is in an unexpected format. Use the Click'n'Load bu
 
 That host isn't supported; only gofile, pixeldrain and MEGA are. The link is set aside and not retried. If the same file exists on a supported host, that copy is used.
 
+### An episode shows *Missing* although it's in the folder
+
+Riparr reads the episode number from the file name (`S01E05`, `1x05`, `E05`, `EP05`, `Episode 5`). A file named without one can't be matched; rename it, or keep it as is and Riparr may download its own copy. Files Riparr finds in the folder are listed under **Files → Already in the folder**. After moving files in by hand, use **Rescan folder** there (otherwise the next scan is within 30 minutes).
+
+### "Only on hosts Riparr can't download from: …"
+
+The source lists that episode, but only on hosts other than gofile, pixeldrain and MEGA. Nothing is downloaded until a supported copy appears; a later check picks it up automatically.
+
 ### A copy shows *standby*
 
 Another host higher in your **preferred hosts** list has the same file. This copy is a fallback and takes over automatically if needed.

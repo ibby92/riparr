@@ -118,3 +118,35 @@ export function planMirrors(files: MirrorCandidate[], priority: string[], now: n
   const sorted = (s: Set<number>) => [...s].sort((a, b) => a - b);
   return { promote: sorted(promote), standby: sorted(standby), covered: sorted(covered) };
 }
+
+export type DiskCopy = { path: string; size: number; season: number | null; episode: number | null };
+
+const VIDEO_NAME = /\.(mkv|mp4|m4v|avi|mov|wmv|ts|m2ts|webm|flv|mpg|mpeg)$/i;
+
+/**
+ * Pending copies (standby or queued) that a file already in the title's folder
+ * makes unnecessary, with the file that covers each:
+ * - shows: same season and episode (a missing season counts as season 1);
+ * - movies: any video file in the folder covers the movie's pending video files.
+ * `busy` holds links with a running job; their files are left alone.
+ */
+export function coveredByDisk(
+  files: (Pick<MirrorCandidate, "fileId" | "linkId" | "name" | "fileStatus"> & { season: number | null; episode: number | null })[],
+  disk: DiskCopy[],
+  type: "show" | "movie",
+  busy: ReadonlySet<number> = new Set(),
+): { fileId: number; path: string }[] {
+  if (disk.length === 0) return [];
+  const pending = files.filter((f) => (f.fileStatus === "standby" || f.fileStatus === "queued") && !busy.has(f.linkId));
+  if (type === "movie") {
+    const videos = disk.filter((d) => VIDEO_NAME.test(d.path)).sort((a, b) => b.size - a.size);
+    if (!videos.length) return [];
+    return pending.filter((f) => VIDEO_NAME.test(f.name)).map((f) => ({ fileId: f.fileId, path: videos[0].path }));
+  }
+  const byEpisode = new Map<string, string>();
+  for (const d of disk) if (d.episode != null) byEpisode.set(`${d.season ?? 1}x${d.episode}`, d.path);
+  return pending.flatMap((f) => {
+    const hit = f.episode == null ? undefined : byEpisode.get(`${f.season ?? 1}x${f.episode}`);
+    return hit ? [{ fileId: f.fileId, path: hit }] : [];
+  });
+}

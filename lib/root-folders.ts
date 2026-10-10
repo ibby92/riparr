@@ -11,7 +11,21 @@ export type RootFolderWithSpace = RootFolder & {
   /** False when the path is missing or not writable right now. */
   accessible: boolean;
   title_count: number;
+  /** Filesystem device id: roots on the same disk share free space (null if unreachable). */
+  device: number | null;
+  /** Another root folder this one is inside of, or contains (overlapping roots confuse folder scans and defaults). */
+  overlaps: string | null;
 };
+
+/** True when `child` is strictly inside `parent` (both normalized absolute paths). */
+function isInside(child: string, parent: string) {
+  return child !== parent && child.startsWith(parent === "/" ? "/" : `${parent}/`);
+}
+
+/** The root folder among `others` that `p` is inside of or contains, if any. */
+function overlapping(p: string, others: string[]): string | null {
+  return others.find((o) => isInside(p, o) || isInside(o, p)) ?? null;
+}
 
 /** Why `p` can't be a root folder, or null if it can. */
 export function rootFolderError(p: string): string | null {
@@ -25,12 +39,21 @@ export function rootFolderError(p: string): string | null {
     if (code === "EACCES" || code === "EPERM") return "Riparr can't write to this folder (check PUID/PGID and permissions)";
     return `Can't use this folder (${code ?? "unknown error"})`;
   }
+  const existing = all<{ path: string }>("SELECT path FROM root_folders WHERE path != ?", p).map((r) => r.path);
+  const other = overlapping(p, existing);
+  if (other) {
+    return isInside(p, other)
+      ? `This folder is inside the root folder ${other}. Use that root and give the title a sub-folder, or remove ${other} first.`
+      : `This folder contains the root folder ${other}. Root folders can't be nested; add the folders beside ${other} instead.`;
+  }
   return null;
 }
 
-/** Normalizes a root folder path: absolute, no trailing slash. */
+/** Normalizes a root folder path: no trailing slash, "." and ".." resolved. Relative paths stay relative (and are refused). */
 export function normalizeRootPath(p: string): string {
-  const resolved = path.resolve(p.trim());
+  const trimmed = p.trim();
+  if (!path.isAbsolute(trimmed)) return trimmed;
+  const resolved = path.posix.normalize(trimmed);
   return resolved.length > 1 ? resolved.replace(/\/+$/, "") : resolved;
 }
 
@@ -39,15 +62,38 @@ export function listRootFolders(): RootFolderWithSpace[] {
     `SELECT r.*, (SELECT COUNT(*) FROM titles t WHERE t.root_folder_id = r.id) AS title_count
        FROM root_folders r ORDER BY r.path`,
   );
+  const paths = rows.map((r) => r.path);
   return rows.map((r) => {
+    const overlaps = overlapping(r.path, paths);
     try {
       const s = fs.statfsSync(r.path);
       fs.accessSync(r.path, fs.constants.W_OK);
-      return { ...r, free_bytes: s.bavail * s.bsize, total_bytes: s.blocks * s.bsize, accessible: true };
+      const device = fs.statSync(r.path).dev;
+      return { ...r, free_bytes: s.bavail * s.bsize, total_bytes: s.blocks * s.bsize, accessible: true, device, overlaps };
     } catch {
-      return { ...r, free_bytes: null, total_bytes: null, accessible: false };
+      return { ...r, free_bytes: null, total_bytes: null, accessible: false, device: null, overlaps };
     }
   });
+}
+
+/**
+ * Free and total space across root folders, counting each disk once (several
+ * roots on one disk share its free space). Null when no root is reachable.
+ */
+export function diskTotals(roots: RootFolderWithSpace[]): { free: number; total: number; disks: number } | null {
+  const seen = new Map<number, { free: number; total: number }>();
+  for (const r of roots) {
+    if (r.device === null || r.free_bytes === null || r.total_bytes === null) continue;
+    if (!seen.has(r.device)) seen.set(r.device, { free: r.free_bytes, total: r.total_bytes });
+  }
+  if (seen.size === 0) return null;
+  let free = 0;
+  let total = 0;
+  for (const d of seen.values()) {
+    free += d.free;
+    total += d.total;
+  }
+  return { free, total, disks: seen.size };
 }
 
 export function getRootFolder(id: number): RootFolder | undefined {
@@ -78,6 +124,7 @@ export type DirEntry = { name: string; path: string };
  */
 export function listDirectories(dir: string): { path: string; parent: string | null; dirs: DirEntry[] } {
   const target = normalizeRootPath(dir || "/");
+  if (!path.isAbsolute(target)) throw new Error("Use an absolute path, e.g. /media");
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(target, { withFileTypes: true });

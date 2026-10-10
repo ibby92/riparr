@@ -15,6 +15,8 @@ export type RootRow = {
   freeBytes: number | null;
   totalBytes: number | null;
   titleCount: number;
+  /** Another root folder this one is inside of or contains. */
+  overlaps: string | null;
 };
 
 type MediaSettings = {
@@ -128,6 +130,12 @@ function RootFolderRow({ root: r, isShowDefault, isMovieDefault }: { root: RootR
           {isShowDefault && <span className="rounded-pill bg-info-soft px-2 py-px text-info">Default for shows</span>}
           {isMovieDefault && <span className="rounded-pill bg-info-soft px-2 py-px text-info">Default for movies</span>}
         </div>
+        {r.overlaps && (
+          <p className="mt-1.5 text-xs text-warn">
+            {r.overlaps.startsWith(`${r.path}/`) ? `Contains the root folder ${r.overlaps}.` : `Inside the root folder ${r.overlaps}.`} Nested root
+            folders make it easy to file a title in the wrong place; remove the one you don&apos;t use.
+          </p>
+        )}
       </div>
       <div className="col-span-2 row-start-2 flex flex-col gap-1.5 text-xs tabular-nums text-muted md:col-span-1 md:col-start-2 md:row-start-1">
         {r.accessible ? (

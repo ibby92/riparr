@@ -9,7 +9,7 @@ import { listRootFolders } from "@/lib/root-folders";
 import { listSources } from "@/lib/sources";
 import { getTitle } from "@/lib/titles";
 import { Card, Poster, StatusPill, Tag, formatBytes } from "../../_kit";
-import { episodeRows, hostLimits, summarize, titleFileViews } from "../../_data/progress";
+import { episodeExtras, episodeRows, hostLimits, summarize, titleFileViews } from "../../_data/progress";
 import { AddSourceForm } from "../../_library/add-source-form";
 import { LinksList } from "../../_library/links-list";
 import { TitleSkeleton } from "../../_library/skeletons";
@@ -51,13 +51,15 @@ async function TitleDetail({
   const sources = listSources(title.id);
   const links = listLinks(title.id);
   const files = titleFileViews(title.id, now, hostLimits(now));
-  const progress = summarize(title, files);
-  const rows = isShow ? episodeRows(title, files) : [];
+  const known = episodeExtras(title.id);
+  const progress = summarize(title, files, known);
+  const rows = isShow ? episodeRows(title, files, known) : [];
   // Files with no episode number: a movie's files, or packs and extras of a show. Standby copies stay hidden.
   const extras = files.filter((f) => (isShow ? f.episode == null : true) && f.state !== "standby");
   const archives = listExtractions(title.id);
   const events = recentEvents(200, title.id);
-  const onDisk = files.filter((f) => f.state === "done" && f.local_path).length;
+  const onDiskPaths = new Set(files.filter((f) => f.state === "done" && f.local_path).map((f) => f.local_path));
+  const onDisk = onDiskPaths.size + known.disk.filter((d) => !onDiskPaths.has(d.path)).length;
   const busy = links.some((l) => l.status === "resolving" || l.status === "downloading");
   const pill = titlePill(title.status, title.type, progress);
   const reason = titleReason(title, progress, now);
@@ -190,6 +192,13 @@ async function TitleDetail({
             <EpisodesPanel title={title} rows={rows} extras={extras} now={now} />
           ) : extras.length ? (
             <FilesCard title="Download" files={extras} type="movie" now={now} />
+          ) : known.disk.length ? (
+            <Card title="Download">
+              <p className="text-sm text-fg-2">
+                Already in the folder, so Riparr won&apos;t download it:{" "}
+                <span className="font-mono text-xs [overflow-wrap:anywhere]">{known.disk.map((d) => d.path.slice(d.path.lastIndexOf("/") + 1)).join(", ")}</span>
+              </p>
+            </Card>
           ) : (
             <EpisodesPanel title={title} rows={[]} extras={[]} now={now} />
           )}
@@ -228,7 +237,7 @@ async function TitleDetail({
         </div>
       )}
 
-      {tab === "files" && <FilesPanel title={title} files={files} archives={archives} freeBytes={freeBytes} now={now} />}
+      {tab === "files" && <FilesPanel title={title} files={files} disk={known.disk} archives={archives} freeBytes={freeBytes} now={now} />}
 
       {tab === "history" && <HistoryPanel events={events} now={now} />}
     </div>

@@ -424,7 +424,8 @@ describe("pipeline + host limits, stalls and usage", () => {
     expect(link().retry_at).toBeGreaterThan(Date.now());
     const file = listFiles(link().id)[0];
     expect(file).toMatchObject({ stalls: 1, bytes_done: 15_000 });
-    expect(fs.statSync(path.join(downloads, ".riparr-partial", `${file.id}.part`)).size).toBe(15_000);
+    const { partialName } = await import("./partials");
+    expect(fs.statSync(path.join(downloads, ".riparr-partial", partialName(file.id, link().url, file.key))).size).toBe(15_000);
     expect(queueOverview().retrying.map((i) => i.id)).toContain(link().id);
 
     clock.now = () => Date.now() + 60_000; // past the short stall retry
@@ -442,6 +443,43 @@ describe("pipeline + host limits, stalls and usage", () => {
     expect(usage.hostb).toBeGreaterThanOrEqual(20_000 + 40_000);
     expect(usage.fakehost).toBeGreaterThan(0);
     expect(hostStatuses().slice(0, 3).map((h) => h.host)).toEqual(["gofile", "pixeldrain", "mega"]);
+  });
+});
+
+describe("pipeline + episodes already in the folder", () => {
+  it("doesn't download an episode the folder already has, even under another name", async () => {
+    (await import("@/lib/settings")).saveSettings({ hostPriority: ["hostb", "hosta"] });
+    const e01 = "Disk.Show.S01E01.1080p.mkv";
+    const e02 = "Disk.Show.S01E02.1080p.mkv";
+    files[e01] = crypto.randomBytes(12_000);
+    files[e02] = crypto.randomBytes(12_000);
+    // The user had E01 before adding the show: another name and size, plus a hidden partial that isn't an episode.
+    const dir = path.join(downloads, "tv", "Disk Show");
+    fs.mkdirSync(path.join(dir, ".riparr-partial"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "Disk Show - S01E01 (my copy).mkv"), "x".repeat(500));
+    fs.writeFileSync(path.join(dir, ".riparr-partial", "Disk.Show.S01E02.part.mkv"), "partial");
+    mirrorCrates.disk = [`/a/${e01}`, `/b/${e01}`, `/a/${e02}`, `/b/${e02}`];
+    const id = addTitle({ name: "Disk Show", url: `${base}/mcrate/disk`, folder: "tv/Disk Show" });
+
+    await check(id, new AbortController().signal);
+    const links = await drain(id);
+
+    expect(hitsFor(e01)).toEqual([]);
+    expect(hitsFor(e02)).toEqual([`b:${e02}`]);
+    expect(Object.fromEntries(links.map((l) => [`${l.host}:${l.url.split("/").pop()}`, l.status]))).toEqual({
+      [`hosta:${e01}`]: "done",
+      [`hostb:${e01}`]: "done",
+      [`hosta:${e02}`]: "mirror",
+      [`hostb:${e02}`]: "done",
+    });
+    const e01Files = listLinks(id).filter((l) => l.url.endsWith(e01)).flatMap((l) => listFiles(l.id));
+    expect(e01Files.map((f) => [f.status, f.local_path])).toEqual([
+      ["skipped", path.join(dir, "Disk Show - S01E01 (my copy).mkv")],
+      ["skipped", path.join(dir, "Disk Show - S01E01 (my copy).mkv")],
+    ]);
+    expect(fs.readdirSync(dir).sort()).toEqual([".riparr-partial", "Disk Show - S01E01 (my copy).mkv", e02]);
+    const { recentEvents } = await import("@/lib/events");
+    expect(recentEvents(50, id).map((e) => e.message)).toContain(`Already in the folder, not downloaded: ${e01}`);
   });
 });
 

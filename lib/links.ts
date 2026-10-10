@@ -257,6 +257,8 @@ export type TitleFile = {
   linkResolvedAt: number | null;
   fileStalls: number;
   blockedNotifiedAt: number | null;
+  season: number | null;
+  episode: number | null;
 };
 
 /** Every file of a title (across all its sources) with its link's state, for mirror selection and settling. */
@@ -265,7 +267,7 @@ export function titleFiles(titleId: number): TitleFile[] {
     `SELECT f.id AS fileId, l.id AS linkId, l.host, f.remote_name AS name, f.dir, f.size,
             f.status AS fileStatus, l.status AS linkStatus, l.discovered_at AS linkDiscoveredAt,
             l.retry_at AS linkRetryAt, l.resolved_at AS linkResolvedAt,
-            f.stalls AS fileStalls, f.blocked_notified_at AS blockedNotifiedAt
+            f.stalls AS fileStalls, f.blocked_notified_at AS blockedNotifiedAt, f.season, f.episode
        FROM files f JOIN links l ON l.id = f.link_id
       WHERE l.title_id = ?`,
     titleId,

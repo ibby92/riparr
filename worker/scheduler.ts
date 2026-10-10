@@ -2,6 +2,7 @@ import { dueSources, recordCheck, type SourceWithTitle } from "@/lib/sources";
 import { RateLimitError } from "@/lib/errors";
 import { logEvent } from "@/lib/events";
 import { notify } from "@/lib/notify";
+import { scanTitle } from "@/lib/disk-scan";
 import { checkSource } from "./check";
 
 const MINUTE = 60_000;
@@ -49,6 +50,8 @@ async function check(source: SourceWithTitle, signal: AbortSignal) {
       logEvent("warn", result.error ?? "Needs attention", title.id);
       void notify({ event: "needs_attention", message: result.error ?? "Needs attention", subject: title });
     } else if (result.newLinks > 0) {
+      // Before mirror selection decides what to download, see what's already in the folder.
+      scanTitle(title.id);
       logEvent("info", `Found ${result.newLinks} new link(s) via ${result.source}`, title.id);
       void notify({ event: "new_links", message: `Found ${result.newLinks} new link(s)`, subject: title });
     }

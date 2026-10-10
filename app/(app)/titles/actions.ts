@@ -180,6 +180,8 @@ export async function addTitle(_prev: FormState, formData: FormData): Promise<Fo
   }
 
   logEvent("info", `Added ${input.type} "${input.name}"`, id);
+  // Before the first check: episodes already in the folder count as on disk.
+  sendCommand({ type: "scan_title", titleId: id });
   if (input.monitored && sources.rows.some((s) => s.input.poll)) sendCommand({ type: "check_title", titleId: id });
   if (input.tmdb_id) cachePosterLater(input.type, input.tmdb_id, input.poster_path);
   redirect(`/titles/${id}`);
@@ -211,6 +213,8 @@ export async function editTitle(_prev: FormState, formData: FormData): Promise<F
 
   updateTitle(id, input);
   if (!input.monitored) sendCommand({ type: "cancel_title", titleId: id });
+  // The folder may have moved.
+  sendCommand({ type: "scan_title", titleId: id });
   if (current.tmdb_id && !sameMatch) {
     const old = { tmdbId: current.tmdb_id, type: current.type };
     after(() => removePosters(old.tmdbId, old.type, configDir()).catch(() => {}));
@@ -245,6 +249,13 @@ export async function toggleTitle(formData: FormData) {
 export async function checkTitleNow(formData: FormData) {
   await requireSession();
   sendCommand({ type: "check_title", titleId: parseId(formData.get("id")) });
+  refresh();
+}
+
+/** Looks for episodes added to the title's folder by hand. */
+export async function rescanTitle(formData: FormData) {
+  await requireSession();
+  sendCommand({ type: "scan_title", titleId: parseId(formData.get("id")), manual: true });
   refresh();
 }
 

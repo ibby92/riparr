@@ -162,8 +162,20 @@ export function clearHostLimit(host: string) {
 }
 
 /** UTC day key, e.g. "2026-10-10". */
-export function utcDay(at: number) {
-  return new Date(at).toISOString().slice(0, 10);
+/**
+ * Day key for usage, e.g. "2026-10-10", in the server's local time zone (TZ),
+ * so "today" matches the dashboard. (Rows written before v1.1 used UTC days.)
+ */
+export function localDay(at: number) {
+  const d = new Date(at);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** The local day `days` days before the one containing `at`. */
+export function localDayBefore(at: number, days: number) {
+  const d = new Date(at);
+  d.setDate(d.getDate() - days);
+  return localDay(d.getTime());
 }
 
 export function addHostUsage(host: string, bytes: number, now = clock.now()) {
@@ -172,21 +184,21 @@ export function addHostUsage(host: string, bytes: number, now = clock.now()) {
     `INSERT INTO host_usage (host, day, bytes) VALUES (?1, ?2, ?3)
      ON CONFLICT (host, day) DO UPDATE SET bytes = bytes + ?3`,
     host,
-    utcDay(now),
+    localDay(now),
     Math.round(bytes),
   );
 }
 
-/** Bytes downloaded per host on the current UTC day. */
+/** Bytes downloaded per host today (local time). */
 export function usageToday(now = clock.now()): Map<string, number> {
-  return new Map(all<{ host: string; bytes: number }>("SELECT host, bytes FROM host_usage WHERE day = ?", utcDay(now)).map((r) => [r.host, r.bytes]));
+  return new Map(all<{ host: string; bytes: number }>("SELECT host, bytes FROM host_usage WHERE day = ?", localDay(now)).map((r) => [r.host, r.bytes]));
 }
 
-/** Bytes per host per UTC day for the last `days` days (today included), oldest first. */
+/** Bytes per host per local day for the last `days` days (today included), oldest first. */
 export function usageByDay(days = 7, now = clock.now()): { day: string; host: string; bytes: number }[] {
   return all<{ day: string; host: string; bytes: number }>(
     "SELECT day, host, bytes FROM host_usage WHERE day >= ? ORDER BY day, host",
-    utcDay(now - (days - 1) * 24 * HOUR),
+    localDayBefore(now, days - 1),
   );
 }
 

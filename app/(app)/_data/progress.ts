@@ -1,6 +1,9 @@
 // Server-only read helpers: per-episode and per-title download state, derived from files + links.
 // Imported only by server components (it reaches the database).
 import { all } from "@/lib/db";
+import { externalDiskFiles, type DiskFile } from "@/lib/disk-scan";
+import { parseEpisode } from "@/lib/episodes";
+import { KNOWN_HOSTS } from "@/lib/host-ids";
 import { activeHostLimits, hostLabel, type HostLimit } from "@/lib/host-status";
 import { listSources, type SourceWithTitle } from "@/lib/sources";
 import type { FileStatus, LinkStatus } from "@/lib/links";
@@ -102,34 +105,98 @@ export type EpisodeRow = {
   season: number | null;
   episode: number;
   state: EpisodeState;
-  /** The copy being shown (null for missing episodes). */
+  /** The copy being shown (null for missing episodes and ones already in the folder). */
   file: FileView | null;
   /** Every copy of this episode across hosts. */
   copies: FileView[];
+  /** A file already in the title's folder that Riparr didn't download (counts as done). */
+  disk: DiskFile | null;
+  /** Hosts Riparr can't download from that the sources list this episode on. */
+  unsupported: string[];
 };
 
+/** What else is known about a title's episodes besides its files. */
+export type EpisodeExtras = {
+  /** Video files already in the folder (see lib/disk-scan.ts). */
+  disk: DiskFile[];
+  /** Links on hosts Riparr can't download from, with the episode they're for. */
+  unsupported: UnsupportedLink[];
+};
+
+export type UnsupportedLink = { season: number; episode: number; host: string };
+
+const NO_EXTRAS: EpisodeExtras = { disk: [], unsupported: [] };
+const SUPPORTED = new Set<string>(KNOWN_HOSTS.map((h) => h.id));
+const episodeKey = (season: number | null, episode: number) => `${season ?? 1}x${episode}`;
+
+function safeDecode(url: string) {
+  try {
+    return decodeURIComponent(url);
+  } catch {
+    return url;
+  }
+}
+
+/** Links of a title on hosts Riparr can't download from, by episode (from the source's metadata or the label). */
+export function unsupportedLinks(titleId: number): UnsupportedLink[] {
+  const rows = all<{ host: string; episode: string | null; label: string | null; url: string }>(
+    "SELECT host, episode, label, url FROM links WHERE title_id = ? AND status = 'ignored'",
+    titleId,
+  );
+  return rows.flatMap((l) => {
+    if (SUPPORTED.has(l.host)) return []; // ignored by the user, not unsupported
+    const ref = parseEpisode(l.episode) ?? parseEpisode(l.label) ?? parseEpisode(safeDecode(l.url));
+    return ref ? [{ ...ref, host: l.host }] : [];
+  });
+}
+
+/** Folder files and unsupported-host links of one title, for its page. */
+export function episodeExtras(titleId: number): EpisodeExtras {
+  return { disk: externalDiskFiles(titleId), unsupported: unsupportedLinks(titleId) };
+}
+
 /**
- * Episodes of a show, by season. When TMDB's episode count is known and the
- * title has one season, episodes no source lists yet show as missing.
+ * Episodes of a show, by season. An episode already in the title's folder
+ * counts as done. When TMDB's episode count is known and the title has one
+ * season, episodes no source lists yet show as missing.
  */
-export function episodeRows(title: Pick<TitleWithStats, "total_episodes">, files: FileView[]): EpisodeRow[] {
+export function episodeRows(title: Pick<TitleWithStats, "total_episodes">, files: FileView[], extras: EpisodeExtras = NO_EXTRAS): EpisodeRow[] {
   const groups = new Map<string, FileView[]>();
   for (const f of files) {
     if (f.episode == null) continue;
-    const key = `${f.season ?? 1}x${f.episode}`;
+    const key = episodeKey(f.season, f.episode);
     const list = groups.get(key);
     if (list) list.push(f);
     else groups.set(key, [f]);
   }
-  const rows: EpisodeRow[] = [...groups.entries()].map(([key, copies]) => {
-    const file = bestFile(copies);
-    return { key, season: copies[0].season ?? 1, episode: copies[0].episode!, state: file.state, file, copies };
-  });
+  const disk = new Map<string, DiskFile>();
+  for (const d of extras.disk) if (d.episode != null && !disk.has(episodeKey(d.season, d.episode))) disk.set(episodeKey(d.season, d.episode), d);
+  const unsupported = new Map<string, Set<string>>();
+  for (const u of extras.unsupported) {
+    const key = episodeKey(u.season, u.episode);
+    unsupported.set(key, (unsupported.get(key) ?? new Set()).add(u.host));
+  }
+
+  const keys = new Map<string, { season: number; episode: number }>();
+  for (const [key, copies] of groups) keys.set(key, { season: copies[0].season ?? 1, episode: copies[0].episode! });
+  for (const [key, d] of disk) keys.set(key, { season: d.season ?? 1, episode: d.episode! });
+  for (const u of extras.unsupported) keys.set(episodeKey(u.season, u.episode), { season: u.season, episode: u.episode });
+
+  const row = (key: string, season: number, episode: number): EpisodeRow => {
+    const copies = groups.get(key) ?? [];
+    const best = copies.length ? bestFile(copies) : null;
+    const onDisk = disk.get(key) ?? null;
+    const base = { key, season, episode, copies, unsupported: [...(unsupported.get(key) ?? [])].sort() };
+    if (best?.state === "done") return { ...base, state: "done", file: best, disk: null };
+    if (onDisk) return { ...base, state: "done", file: null, disk: onDisk };
+    return { ...base, state: best?.state ?? "missing", file: best, disk: null };
+  };
+  const rows = [...keys.entries()].map(([key, k]) => row(key, k.season, k.episode));
   const seasons = new Set(rows.map((r) => r.season));
   if (title.total_episodes && seasons.size <= 1) {
     const season = rows[0]?.season ?? 1;
     for (let e = 1; e <= title.total_episodes; e++) {
-      if (!groups.has(`${season}x${e}`)) rows.push({ key: `${season}x${e}`, season, episode: e, state: "missing", file: null, copies: [] });
+      if (!keys.has(episodeKey(season, e))) rows.push(row(episodeKey(season, e), season, e));
     }
   }
   return rows.sort((a, b) => (a.season ?? 1) - (b.season ?? 1) || a.episode - b.episode);
@@ -154,14 +221,14 @@ function emptyProgress(): TitleProgress {
 }
 
 /** Rolls file states up to the title level, for cards and lists. */
-export function summarize(title: TitleWithStats, files: FileView[]): TitleProgress {
+export function summarize(title: TitleWithStats, files: FileView[], extras: EpisodeExtras = NO_EXTRAS): TitleProgress {
   const p = emptyProgress();
   for (const f of files) {
     if (f.state === "done" && (!p.latest || f.updated_at > p.latest.at)) p.latest = { season: f.season, episode: f.episode, at: f.updated_at };
   }
   const waitingFiles: FileView[] = [];
   if (title.type === "show") {
-    const rows = episodeRows(title, files);
+    const rows = episodeRows(title, files, extras);
     for (const r of rows) {
       if (r.state === "done") p.done++;
       else if (r.state === "downloading") p.downloading++;
@@ -177,9 +244,11 @@ export function summarize(title: TitleWithStats, files: FileView[]): TitleProgre
     const pending = relevant.filter((f) => f.state !== "done" && f.state !== "failed");
     // A movie is done when something finished and nothing is still on its way.
     p.movieState = state === "done" && pending.length ? bestFile(pending).state : state;
+    // The movie is already in its folder (from before Riparr, or added by hand).
+    if (p.movieState !== "done" && p.movieState !== "downloading" && extras.disk.length) p.movieState = "done";
     const total = relevant.reduce((n, f) => n + (f.size ?? 0), 0);
     const doneBytes = relevant.reduce((n, f) => n + (f.state === "done" ? (f.size ?? f.bytes_done) : f.bytes_done), 0);
-    p.movieFraction = total > 0 ? Math.min(1, doneBytes / total) : null;
+    p.movieFraction = p.movieState === "done" ? 1 : total > 0 ? Math.min(1, doneBytes / total) : null;
     p.total = 1;
     if (p.movieState === "done") p.done = 1;
     else if (p.movieState === "downloading") p.downloading = p.movieFraction ?? 0.5;
@@ -205,7 +274,9 @@ export function allTitleProgress(titles: TitleWithStats[], now: number): Map<num
     if (list) list.push(v);
     else byTitle.set(f.title_id, [v]);
   }
-  return new Map(titles.map((t) => [t.id, summarize(t, byTitle.get(t.id) ?? [])]));
+  const disk = new Map<number, DiskFile[]>();
+  for (const d of externalDiskFiles()) disk.set(d.title_id, [...(disk.get(d.title_id) ?? []), d]);
+  return new Map(titles.map((t) => [t.id, summarize(t, byTitle.get(t.id) ?? [], { disk: disk.get(t.id) ?? [], unsupported: [] })]));
 }
 
 export function sourcesByTitle(): Map<number, SourceWithTitle[]> {

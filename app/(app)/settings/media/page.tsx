@@ -25,6 +25,7 @@ async function Media() {
     freeBytes: r.free_bytes,
     totalBytes: r.total_bytes,
     titleCount: r.title_count,
+    overlaps: r.overlaps,
   }));
   return (
     <MediaForm

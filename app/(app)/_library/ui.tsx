@@ -83,6 +83,7 @@ export function EpisodePill({
   percent,
   hostLabel,
   until,
+  inFolder = false,
   now,
 }: {
   state: EpisodeState;
@@ -90,11 +91,13 @@ export function EpisodePill({
   percent?: number | null;
   hostLabel?: string;
   until?: number | null;
+  /** Done because the file was already in the title's folder, not downloaded. */
+  inFolder?: boolean;
   now: number;
 }) {
   switch (state) {
     case "done":
-      return <StatusPill state={type === "movie" ? "downloaded" : "ok"} label="Downloaded" />;
+      return <StatusPill state={type === "movie" ? "downloaded" : "ok"} label={inFolder ? "In folder" : "Downloaded"} />;
     case "downloading":
       return <StatusPill state="downloading" label={percent != null ? `Downloading ${percent}%` : "Downloading"} />;
     case "waiting":
