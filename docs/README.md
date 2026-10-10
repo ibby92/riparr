@@ -18,3 +18,4 @@ Riparr watches **containers** (link-protector or paste pages that list file-host
 | --- | --- |
 | [Architecture](architecture.md) | Processes, the download pipeline, state machines, data model, extension points |
 | [Development](development.md) | Local setup, tests, builds, conventions, and how to add a host or container source |
+| [Roadmap](roadmap.md) | What's planned next: titles and sources, *arr-style folders, the UI redesign, host limits, packaging |
