@@ -41,7 +41,7 @@ Summary for dashboards such as Homepage or Homarr custom widgets.
 
 ```json
 {
-  "version": "0.1.0",
+  "version": "1.0.0",
   "schema_version": 8,
   "worker": { "online": true, "last_seen_ms": 1200 },
   "titles": { "total": 6, "shows": 5, "movies": 1, "monitored": 5, "needs_attention": 0, "error": 0 },
