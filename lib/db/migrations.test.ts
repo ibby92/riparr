@@ -6,7 +6,11 @@ import { migrate, MIGRATIONS } from "./migrations";
 function databaseAt(version: number) {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON");
-  for (let v = 0; v < version; v++) db.exec(MIGRATIONS[v]);
+  for (let v = 0; v < version; v++) {
+    const step = MIGRATIONS[v];
+    if (typeof step === "string") db.exec(step);
+    else step(db, { downloadsRoot: "/downloads" });
+  }
   db.exec(`PRAGMA user_version = ${version}`);
   return db;
 }
@@ -42,10 +46,10 @@ describe("migration 6 (links/files rebuild)", () => {
     db.exec("UPDATE files SET status = 'standby' WHERE id = 100");
     expect(() => db.exec("UPDATE links SET status = 'bogus' WHERE id = 11")).toThrow();
 
-    // Foreign keys are back on and still cascade from containers through links to files.
+    // Foreign keys are back on and still cascade from titles (formerly containers) through links to files.
     expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
     expect(() => db.exec("INSERT INTO files (link_id, remote_name, updated_at) VALUES (999, 'x', 1)")).toThrow();
-    db.exec("DELETE FROM containers WHERE id = 1");
+    db.exec("DELETE FROM titles WHERE id = 1");
     expect(db.prepare("SELECT COUNT(*) AS n FROM links").get()).toEqual({ n: 0 });
     expect(db.prepare("SELECT COUNT(*) AS n FROM files").get()).toEqual({ n: 0 });
     expect(db.prepare("SELECT COUNT(*) AS n FROM extractions").get()).toEqual({ n: 0 });
@@ -59,5 +63,71 @@ describe("migration 6 (links/files rebuild)", () => {
     expect(indexes.map((r) => r.name)).toEqual(
       expect.arrayContaining(["files_link_key", "files_status", "links_status"]),
     );
+  });
+});
+
+describe("migration 8 (titles, sources, root folders)", () => {
+  it("turns each container into a title + source, keeping links, files, events and archives", () => {
+    const db = databaseAt(7);
+    db.exec(`
+      INSERT INTO containers (id, name, url, password, poll_interval_min, enabled, poll, target_dir, path_template,
+                              status, last_error, last_checked_at, next_check_at, created_at)
+        VALUES (3, 'Doctor X', 'https://mkvdrama.net/c/x', 'pw', 30, 1, 1, 'tv/Doctor X', '{container}/{filename}',
+                'ok', NULL, 500, 900, 100),
+               (4, 'Paused', 'https://viewcrate.cc/c/y', NULL, 60, 0, 0, '', '{filename}', 'pending', NULL, NULL, 0, 200);
+      INSERT INTO links (id, container_id, url, fingerprint, host, status, discovered_at, label, episode)
+        VALUES (10, 3, 'https://pixeldrain.com/u/a', 'fp-a', 'pixeldrain', 'done', 300, 'Doctor.X.S01E01.mkv', 'S01E01');
+      INSERT INTO files (id, link_id, remote_name, status, updated_at, key, local_path)
+        VALUES (100, 10, 'Doctor.X.S01E01.mkv', 'done', 300, 'a', 'tv/Doctor X/Doctor X/Doctor.X.S01E01.mkv');
+      INSERT INTO events (at, level, container_id, message) VALUES (400, 'info', 3, 'Downloaded');
+      INSERT INTO extractions (container_id, entry_path, status, updated_at) VALUES (3, 'tv/Doctor X/a.zip', 'extracted', 1);
+    `);
+
+    migrate(db, { downloadsRoot: "/srv/media" });
+
+    const row = (sql: string) => ({ ...db.prepare(sql).get() });
+    const rows = (sql: string) => db.prepare(sql).all().map((r) => ({ ...r }));
+    expect(rows("SELECT id, path FROM root_folders")).toEqual([{ id: 1, path: "/srv/media" }]);
+    expect(rows("SELECT id, type, name, root_folder_id, folder, season_folders, naming, monitored FROM titles ORDER BY id")).toEqual([
+      { id: 3, type: "show", name: "Doctor X", root_folder_id: 1, folder: "tv/Doctor X", season_folders: 0, naming: "{title}/{filename}", monitored: 1 },
+      { id: 4, type: "show", name: "Paused", root_folder_id: 1, folder: "Paused", season_folders: 0, naming: "{filename}", monitored: 0 },
+    ]);
+    expect(row("SELECT title_id, url, password, poll_interval_min, poll, status, last_checked_at, next_check_at FROM sources WHERE id = 3")).toEqual({
+      title_id: 3, url: "https://mkvdrama.net/c/x", password: "pw", poll_interval_min: 30, poll: 1, status: "ok", last_checked_at: 500, next_check_at: 900,
+    });
+    expect(row("SELECT title_id, source_id, label, episode FROM links WHERE id = 10")).toEqual({
+      title_id: 3, source_id: 3, label: "Doctor.X.S01E01.mkv", episode: "S01E01",
+    });
+    expect(row("SELECT season, episode, local_path FROM files WHERE id = 100")).toEqual({
+      season: null, episode: null, local_path: "tv/Doctor X/Doctor X/Doctor.X.S01E01.mkv",
+    });
+    expect(row("SELECT title_id, message FROM events")).toEqual({ title_id: 3, message: "Downloaded" });
+    expect(row("SELECT title_id, entry_path FROM extractions")).toEqual({ title_id: 3, entry_path: "/srv/media/tv/Doctor X/a.zip" });
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'containers'").get()).toBeUndefined();
+
+    // Foreign keys work end to end on the new tables.
+    expect(db.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
+    db.exec("DELETE FROM sources WHERE id = 3");
+    expect(row("SELECT source_id FROM links WHERE id = 10")).toEqual({ source_id: null });
+    db.exec("DELETE FROM titles WHERE id = 3");
+    for (const t of ["links", "files", "events", "extractions"]) {
+      expect(row(`SELECT COUNT(*) AS n FROM ${t}`)).toEqual({ n: 0 });
+    }
+  });
+
+  it("works on an empty database (no root folder is invented)", () => {
+    const db = databaseAt(7);
+    migrate(db, { downloadsRoot: "/srv/media" });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM root_folders").get()).toEqual({ n: 0 });
+  });
+
+  it("runs the backup hook before upgrading an existing database, and only then", () => {
+    const calls: number[] = [];
+    const existing = databaseAt(7);
+    migrate(existing, { downloadsRoot: "/x" }, (from) => calls.push(from));
+    migrate(existing, { downloadsRoot: "/x" }, (from) => calls.push(from)); // already current
+    const fresh = new DatabaseSync(":memory:");
+    migrate(fresh, { downloadsRoot: "/x" }, (from) => calls.push(from)); // brand new install
+    expect(calls).toEqual([7]);
   });
 });

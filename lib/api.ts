@@ -1,7 +1,10 @@
 import { connection, type NextRequest } from "next/server";
 import { z } from "zod";
 import { authMode, SESSION_COOKIE, verifyApiKey, verifySessionToken } from "./auth";
-import { containerInput, type Container } from "./containers";
+import { listRootFolders } from "./root-folders";
+import { getSettings } from "./settings";
+import type { Source, SourceWithTitle } from "./sources";
+import { defaultFolder, titleInput, type TitleInput, type TitleType, type TitleWithStats } from "./titles";
 
 export class ApiError extends Error {
   constructor(
@@ -58,23 +61,37 @@ export async function idParam(ctx: { params: Promise<{ id: string }> }): Promise
   return id;
 }
 
-/** Public shape of a container: never includes the password. */
-export function containerDto(c: Container & { link_count?: number; done_count?: number }) {
-  const { password, ...rest } = c;
-  return { ...rest, enabled: c.enabled === 1, poll: c.poll === 1, has_password: Boolean(password) };
+/** Public shape of a source: never includes the password. */
+export function sourceDto(s: Source & Partial<Pick<SourceWithTitle, "title_name" | "link_count">>) {
+  const { password, ...rest } = s;
+  return { ...rest, enabled: s.enabled === 1, poll: s.poll === 1, has_password: Boolean(password) };
 }
 
-/** Same fields as the UI form; booleans default to true, template to "{dir}/{filename}". */
-export function parseContainerBody(body: Record<string, unknown>) {
-  const str = (v: unknown, fallback = "") => (v === undefined || v === null ? fallback : String(v));
-  return containerInput.parse({
-    name: str(body.name),
-    url: str(body.url),
-    password: str(body.password),
-    poll_interval_min: str(body.poll_interval_min, "60"),
-    target_dir: str(body.target_dir),
-    path_template: str(body.path_template, "{dir}/{filename}"),
-    enabled: body.enabled === false ? undefined : "on",
-    poll: body.poll === false ? undefined : "on",
+/** Public shape of a title. */
+export function titleDto(t: TitleWithStats) {
+  return { ...t, season_folders: t.season_folders === 1, monitored: t.monitored === 1 };
+}
+
+/**
+ * Title fields from a JSON body, with defaults: the default root folder for the
+ * type, a folder named after the title, and season folders per Media Management.
+ */
+export function parseTitleBody(body: Record<string, unknown>, existing?: TitleInput) {
+  const settings = getSettings();
+  const type = (body.type ?? existing?.type ?? "show") as TitleType;
+  const roots = listRootFolders();
+  const defaultRoot =
+    roots.find((r) => r.id === (type === "movie" ? settings.defaultMovieRootId : settings.defaultShowRootId)) ?? roots[0];
+  const merged = { ...existing, ...body, type };
+  const name = String(merged.name ?? "");
+  const rawYear: unknown = merged.year;
+  const year = rawYear === undefined || rawYear === null || rawYear === "" ? null : Number(rawYear);
+  return titleInput.parse({
+    ...merged,
+    root_folder_id: merged.root_folder_id ?? defaultRoot?.id,
+    folder: merged.folder ?? (name ? defaultFolder(name, type, Number.isFinite(year) ? year : null) : ""),
+    season_folders: merged.season_folders ?? settings.defaultSeasonFolders,
+    naming: merged.naming ?? "{filename}",
+    monitored: merged.monitored ?? true,
   });
 }

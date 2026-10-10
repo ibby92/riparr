@@ -13,10 +13,11 @@ import {
 import { credentialsInput } from "@/lib/credentials";
 import { requireSession, startSession } from "@/lib/session";
 import { ACCOUNT_FIELDS, listHostAccounts, saveHostAccount } from "@/lib/host-accounts";
-import { normalizeTargetDir } from "@/lib/paths";
 import { testFlareSolverr } from "@/lib/crawlers";
 import { maskProxyUrl, proxiedFetch, proxyUrlError, proxyUrlSetting, publicIp, unmaskProxyUrl } from "@/lib/net";
 import { notify } from "@/lib/notify";
+import { addRootFolder, normalizeRootPath, removeRootFolder, rootFolderError } from "@/lib/root-folders";
+import { clearTmdbCache, createTmdbClient } from "@/lib/tmdb";
 import { KNOWN_HOSTS } from "@/lib/host-ids";
 import { getSettings, NOTIFY_EVENTS, saveSettings, type NotifyEvent } from "@/lib/settings";
 
@@ -28,6 +29,11 @@ const optionalUrl = z
   .refine((v) => v === "" || /^https?:\/\/[^\s]+$/.test(v), "Must be an http(s) URL")
   .transform((v) => v.replace(/\/+$/, ""));
 
+const optionalId = z.preprocess(
+  (v) => (v === "" || v === undefined || v === null ? null : v),
+  z.coerce.number<string>().int().positive().nullable(),
+);
+
 const settingsInput = z.object({
   concurrency: z.coerce.number<string>().int().min(1).max(20),
   perHost: z.coerce.number<string>().int().min(1).max(10),
@@ -36,18 +42,12 @@ const settingsInput = z.object({
   cnlEnabled: z.preprocess((v) => v === "on", z.boolean()),
   extractEnabled: z.preprocess((v) => v === "on", z.boolean()),
   extractDeleteArchives: z.preprocess((v) => v === "on", z.boolean()),
-  cnlTargetDir: z.string().transform((v, ctx) => {
-    const dir = normalizeTargetDir(v);
-    if (dir === null) {
-      ctx.addIssue({ code: "custom", message: "Must be a relative path inside the downloads folder" });
-      return z.NEVER;
-    }
-    return dir;
-  }),
-  cnlTemplate: z
-    .string()
-    .trim()
-    .refine((v) => v.includes("{filename}") || v.includes("{name}"), "Template must include {filename} or {name}"),
+  defaultShowRootId: optionalId,
+  defaultMovieRootId: optionalId,
+  defaultSeasonFolders: z.preprocess((v) => v === "on", z.boolean()),
+  // Secret: the form never shows it, so an empty field keeps the saved key.
+  tmdbApiKey: z.string().trim().optional(),
+  tmdbLanguage: z.string().trim().regex(/^[a-z]{2}(-[A-Z]{2})?$/, "Use a language code like en-US").default("en-US"),
   flaresolverrUrl: optionalUrl,
   proxyUrl: z.string().trim(),
   proxyScope: z.enum(["containers", "all"]).default("containers"),
@@ -59,7 +59,12 @@ export async function saveAppSettings(_prev: SettingsState, formData: FormData):
   await requireSession();
   const parsed = settingsInput.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { errors: z.flattenError(parsed.error).fieldErrors };
-  const { mbPerSecond, ...rest } = parsed.data;
+  const { mbPerSecond, tmdbApiKey, ...rest } = parsed.data;
+  const keyChanged = Boolean(tmdbApiKey) || formData.get("clearTmdbApiKey") === "on";
+  if (keyChanged) {
+    saveSettings({ tmdbApiKey: formData.get("clearTmdbApiKey") === "on" ? "" : tmdbApiKey! });
+    clearTmdbCache();
+  }
   // The form shows the proxy password masked; keep the stored one unless it was retyped.
   rest.proxyUrl = unmaskProxyUrl(rest.proxyUrl, getSettings().proxyUrl);
   const proxyError = proxyUrlError(rest.proxyUrl);
@@ -149,4 +154,32 @@ export async function checkProxy(): Promise<TestState> {
   } catch (err) {
     return { ok: false, result: `Proxy failed: ${err instanceof Error ? (err.cause instanceof Error ? err.cause.message : err.message) : err}` };
   }
+}
+
+export type RootFolderState = { error?: string; message?: string };
+
+export async function addRootFolderAction(_prev: RootFolderState, formData: FormData): Promise<RootFolderState> {
+  await requireSession();
+  const raw = String(formData.get("path") ?? "").trim();
+  if (!raw) return { error: "Enter a folder path" };
+  const p = normalizeRootPath(raw);
+  const error = rootFolderError(p);
+  if (error) return { error };
+  addRootFolder(p);
+  refresh();
+  return { message: `Added ${p}` };
+}
+
+export async function removeRootFolderAction(formData: FormData) {
+  await requireSession();
+  removeRootFolder(Number(formData.get("id")));
+  refresh();
+}
+
+export async function checkTmdb(): Promise<TestState> {
+  await requireSession();
+  const { tmdbApiKey, tmdbLanguage } = getSettings();
+  if (!tmdbApiKey) return { ok: false, result: "No TMDB API key saved" };
+  const result = await createTmdbClient({ apiKey: tmdbApiKey, language: tmdbLanguage }).testConnection();
+  return result.ok ? { ok: true, result: "Connected to TMDB" } : { ok: false, result: result.error };
 }

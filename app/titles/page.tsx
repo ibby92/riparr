@@ -2,35 +2,35 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
-import { listContainers } from "@/lib/containers";
+import { listTitles } from "@/lib/titles";
 import { formatAgo, StatusBadge } from "../ui";
-import { checkNow, toggleContainer } from "./actions";
+import { checkTitleNow, toggleTitle } from "./actions";
 
-export const metadata: Metadata = { title: "Containers" };
+export const metadata: Metadata = { title: "Library" };
 
-export default function ContainersPage() {
+export default function LibraryPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Containers</h1>
-        <Link href="/containers/new" className="btn btn-primary">
-          Add container
+        <h1 className="text-2xl font-semibold">Library</h1>
+        <Link href="/titles/new" className="btn btn-primary">
+          Add title
         </Link>
       </div>
       <Suspense fallback={<div className="card h-40 animate-pulse" />}>
-        <ContainerTable />
+        <TitleTable />
       </Suspense>
     </div>
   );
 }
 
-async function ContainerTable() {
+async function TitleTable() {
   await connection();
-  const containers = listContainers();
-  if (containers.length === 0) {
+  const titles = listTitles();
+  if (titles.length === 0) {
     return (
       <div className="card p-8 text-center text-sm text-muted">
-        No containers yet. Add a container link and Riparr will poll it for new content.
+        Your library is empty. Add a show or movie and the pages that list its links; Riparr checks them for new content.
       </div>
     );
   }
@@ -43,45 +43,46 @@ async function ContainerTable() {
       <table className="w-full text-sm">
         <thead className="border-b border-border text-left text-xs uppercase tracking-wide text-muted">
           <tr>
-            <th className="px-4 py-2 font-medium">Name</th>
+            <th className="px-4 py-2 font-medium">Title</th>
             <th className="px-4 py-2 font-medium">Status</th>
-            <th className="px-4 py-2 font-medium">Links</th>
+            <th className="px-4 py-2 font-medium">Episodes</th>
+            <th className="px-4 py-2 font-medium">Sources</th>
             <th className="px-4 py-2 font-medium">Last check</th>
-            <th className="px-4 py-2 font-medium">Next check</th>
             <th className="px-4 py-2" />
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
-          {containers.map((c) => (
-            <tr key={c.id}>
+          {titles.map((t) => (
+            <tr key={t.id}>
               <td className="px-4 py-2">
-                <Link href={`/containers/${c.id}`} className="font-medium hover:text-accent">
-                  {c.name}
+                <Link href={`/titles/${t.id}`} className="font-medium hover:text-accent">
+                  {t.name}
+                  {t.year ? ` (${t.year})` : ""}
                 </Link>
-                <div className="max-w-xs truncate text-xs text-muted">{c.url}</div>
+                <div className="max-w-xs truncate text-xs text-muted">
+                  {t.type === "show" ? "Show" : "Movie"} · {t.root_path}/{t.folder}
+                </div>
               </td>
               <td className="px-4 py-2">
-                <StatusBadge status={c.status} enabled={c.enabled === 1} />
+                <StatusBadge status={t.status} />
               </td>
               <td className="px-4 py-2 tabular-nums">
-                {c.done_count} / {c.link_count}
+                {t.type === "show" ? `${t.episodes_done}${t.total_episodes ? ` / ${t.total_episodes}` : ""}` : t.done_count ? "Downloaded" : "—"}
               </td>
-              <td className="px-4 py-2 text-muted">{formatAgo(c.last_checked_at, now)}</td>
-              <td className="px-4 py-2 text-muted">
-                {!c.enabled ? "—" : !c.poll ? "Click'n'Load only" : c.next_check_at <= now ? "due" : formatAgo(c.next_check_at, now)}
-              </td>
+              <td className="px-4 py-2 tabular-nums">{t.source_count}</td>
+              <td className="px-4 py-2 text-muted">{formatAgo(t.last_checked_at, now)}</td>
               <td className="px-4 py-2">
                 <div className="flex justify-end gap-2">
-                  <form action={checkNow}>
-                    <input type="hidden" name="id" value={c.id} />
-                    <button className="btn" disabled={!c.enabled || !c.poll}>
+                  <form action={checkTitleNow}>
+                    <input type="hidden" name="id" value={t.id} />
+                    <button className="btn" disabled={!t.monitored || !t.source_count}>
                       Check now
                     </button>
                   </form>
-                  <form action={toggleContainer}>
-                    <input type="hidden" name="id" value={c.id} />
-                    <input type="hidden" name="enabled" value={c.enabled ? "0" : "1"} />
-                    <button className="btn">{c.enabled ? "Pause" : "Resume"}</button>
+                  <form action={toggleTitle}>
+                    <input type="hidden" name="id" value={t.id} />
+                    <input type="hidden" name="monitored" value={t.monitored ? "0" : "1"} />
+                    <button className="btn">{t.monitored ? "Pause" : "Resume"}</button>
                   </form>
                 </div>
               </td>

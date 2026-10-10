@@ -15,12 +15,12 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: { default: "Riparr", template: "%s · Riparr" },
-  description: "Watches link containers and downloads new content into your library",
+  description: "Tracks shows and movies and downloads new episodes into your library",
 };
 
 const NAV = [
   { href: "/", label: "Dashboard" },
-  { href: "/containers", label: "Containers" },
+  { href: "/titles", label: "Library" },
   { href: "/queue", label: "Queue" },
   { href: "/settings", label: "Settings" },
 ] as const;

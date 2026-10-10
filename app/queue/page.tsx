@@ -29,11 +29,11 @@ async function Queue() {
       {active.length > 0 && <AutoRefresh />}
       <section className="card">
         <h2 className="border-b border-border px-4 py-2 font-medium">Active and waiting ({active.length})</h2>
-        <LinksTable links={active} now={now} showContainer empty="Nothing queued." />
+        <LinksTable links={active} now={now} showTitle empty="Nothing queued." />
       </section>
       <section className="card">
         <h2 className="border-b border-border px-4 py-2 font-medium">Recently finished</h2>
-        <LinksTable links={recentlyFinishedLinks(50)} now={now} showContainer empty="Nothing yet." />
+        <LinksTable links={recentlyFinishedLinks(50)} now={now} showTitle empty="Nothing yet." />
       </section>
     </>
   );

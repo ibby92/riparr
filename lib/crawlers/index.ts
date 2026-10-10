@@ -120,6 +120,10 @@ async function fetchPage(url: string, opts: CrawlOptions, init: RequestInit = {}
     if ((res.status === 403 || res.status === 503 || res.status === 429) && CHALLENGE.test(html)) {
       throw new ChallengeError(CHALLENGE_MSG);
     }
+    // The site removed the page: retrying won't help, a person needs to replace or remove the source.
+    if (res.status === 404 || res.status === 410) {
+      throw new NeedsAttentionError(`This page no longer exists on the site (HTTP ${res.status}); remove this source or replace its URL`);
+    }
     throw new Error(`HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""} fetching ${url}`);
   }
   const setCookies = (res.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0].trim()).filter(Boolean);

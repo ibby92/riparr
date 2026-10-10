@@ -57,18 +57,31 @@ export function sanitizeSegment(name: string): string {
 
 /** Tokens accepted by `renderTemplate`, for the UI form hint. */
 export const TEMPLATE_TOKENS = [
-  { token: "{container}", description: "Container name" },
+  { token: "{title}", description: "Show or movie name" },
+  { token: "{season}", description: "Season number, 2 digits (empty if unknown)" },
+  { token: "{episode}", description: "Episode number, 2 digits (empty if unknown)" },
   { token: "{host}", description: "File host id, e.g. pixeldrain" },
   { token: "{filename}", description: "File name with extension" },
   { token: "{name}", description: "File name without extension" },
   { token: "{ext}", description: "Extension without the dot" },
   { token: "{dir}", description: "Sub-folder inside a remote folder (may be empty)" },
   { token: "{date}", description: "Download date, YYYY-MM-DD" },
-  { token: "{year}", description: "Download year" },
+  { token: "{year}", description: "Release year of the title (download year if unknown)" },
   { token: "{month}", description: "Download month, 01-12" },
 ] as const;
 
-export type TemplateVars = { container: string; host: string; filename: string; dir: string; date: Date };
+export type TemplateVars = {
+  title: string;
+  host: string;
+  filename: string;
+  dir: string;
+  /** When the link was found; used by {date}, {month} and as the {year} fallback. */
+  date: Date;
+  season?: number | null;
+  episode?: number | null;
+  /** The title's release year. */
+  year?: number | null;
+};
 
 /**
  * Renders a path template into a safe relative POSIX path. "/" in the template
@@ -80,8 +93,13 @@ export function renderTemplate(template: string, vars: TemplateVars): string {
   const [name, dotExt] = splitExt(vars.filename);
   const pad = (n: number) => String(n).padStart(2, "0");
   const d = vars.date;
+  const num = (n: number | null | undefined) => (n == null ? "" : pad(n));
   const values: Record<string, string> = {
-    container: clean(vars.container),
+    title: clean(vars.title),
+    // Pre-v1 name for {title}, kept so older templates keep working.
+    container: clean(vars.title),
+    season: num(vars.season),
+    episode: num(vars.episode),
     host: clean(vars.host),
     filename: clean(vars.filename),
     name: clean(name),
@@ -92,7 +110,7 @@ export function renderTemplate(template: string, vars: TemplateVars): string {
       .filter((p) => p !== "" && p !== "." && p !== "..")
       .join("/"),
     date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-    year: String(d.getFullYear()),
+    year: String(vars.year ?? d.getFullYear()),
     month: pad(d.getMonth() + 1),
   };
   const rendered = template.replace(/\{(\w+)\}/g, (m, key: string) =>

@@ -65,7 +65,7 @@ describe("crawlContainer", () => {
   });
 
   it("maps HTTP errors", async () => {
-    await expect(crawl(() => html("gone", 404)).promise).rejects.toThrow(/^HTTP 404/);
+    await expect(crawl(() => html("oops", 500)).promise).rejects.toThrow(/^HTTP 500/);
     const cf = crawl(() => html(CF_PAGE, 403));
     await expect(cf.promise).rejects.toBeInstanceOf(NeedsAttentionError);
     await expect(cf.promise).rejects.toThrow(/configure FlareSolverr in Settings/);
@@ -293,5 +293,17 @@ describe("crawlContainer with FlareSolverr", () => {
       "nope",
     );
     await expect(c.promise).rejects.toThrow(/rejected the password/);
+  });
+});
+
+describe("removed source pages", () => {
+  it.each([404, 410])("treats HTTP %i as needing attention, not a retryable error", async (status) => {
+    const err = await crawlContainer("https://site.example/c/gone", {
+      password: null,
+      signal: new AbortController().signal,
+      fetch: (async () => new Response("gone", { status })) as unknown as typeof fetch,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(NeedsAttentionError);
+    expect(err.message).toMatch(/no longer exists/);
   });
 });

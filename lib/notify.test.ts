@@ -24,7 +24,7 @@ function recorder(status = 200) {
   return { calls, fetchImpl };
 }
 
-const container = { id: 7, name: "Show", password: "hunter2", url: "https://secret.example/x" };
+const subject = { id: 7, name: "Show", password: "hunter2", url: "https://secret.example/x" };
 
 describe("notify", () => {
   it("does nothing when unconfigured or the event is off", async () => {
@@ -35,16 +35,16 @@ describe("notify", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("posts JSON to the webhook without leaking container secrets", async () => {
+  it("posts JSON to the webhook without leaking secrets", async () => {
     saveSettings({ notifyWebhookUrl: "http://hooks.local/x", notifyEvents: ["download_done"] });
     const { calls, fetchImpl } = recorder();
-    await notify({ event: "download_done", message: "Downloaded a.mkv", container }, fetchImpl);
+    await notify({ event: "download_done", message: "Downloaded a.mkv", subject }, fetchImpl);
     expect(calls).toHaveLength(1);
     expect(calls[0].body).toMatchObject({
       event: "download_done",
       title: "Riparr: Download finished",
       message: "Downloaded a.mkv",
-      container: { id: 7, name: "Show" },
+      media: { id: 7, name: "Show" },
     });
     expect(JSON.stringify(calls[0].body)).not.toContain("hunter2");
     expect(JSON.stringify(calls[0].body)).not.toContain("secret.example");
@@ -57,10 +57,10 @@ describe("notify", () => {
       notifyEvents: ["needs_attention"],
     });
     const { calls, fetchImpl } = recorder();
-    await notify({ event: "needs_attention", message: "Captcha", container }, fetchImpl);
+    await notify({ event: "needs_attention", message: "Captcha", subject }, fetchImpl);
     expect(calls.map((c) => c.body)).toEqual([
-      { username: "Riparr", content: "**Riparr: Container needs attention**\nShow: Captcha" },
-      { title: "Riparr: Container needs attention", body: "Show: Captcha", type: "warning" },
+      { username: "Riparr", content: "**Riparr: Needs attention**\nShow: Captcha" },
+      { title: "Riparr: Needs attention", body: "Show: Captcha", type: "warning" },
     ]);
 
     const failing = recorder(500);

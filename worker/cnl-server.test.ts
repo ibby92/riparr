@@ -10,7 +10,14 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "riparr-cnl-"));
 process.env.RIPARR_CONFIG_DIR = tmp;
 
 const { closeDb } = await import("@/lib/db");
-const { containerInput, createContainer, listContainers } = await import("@/lib/containers");
+const { addRootFolder } = await import("@/lib/root-folders");
+const { createSource, listSources, sourceInput } = await import("@/lib/sources");
+const { createTitle, getTitle, titleInput } = await import("@/lib/titles");
+const media = path.join(tmp, "media");
+fs.mkdirSync(path.join(media, "Kdrama"), { recursive: true });
+fs.mkdirSync(path.join(media, "TV"), { recursive: true });
+/** Title id and source of the source whose URL is `url`. */
+const sourceByUrl = (url: string) => listSources().find((s) => s.url === url)!;
 const { listLinks } = await import("@/lib/links");
 const { normalizePageUrl } = await import("@/lib/clicknload");
 const { getSettings, saveSettings } = await import("@/lib/settings");
@@ -54,18 +61,18 @@ describe("Click'n'Load listener", () => {
     expect((await fetch(`${base}/nope`)).status).toBe(404);
   });
 
-  it("routes encrypted links to the container whose page sent them", async () => {
-    const id = createContainer(
-      containerInput.parse({
-        name: "Captcha Show",
-        url: "https://www.crate.example/folder/abc/",
-        password: "",
-        poll_interval_min: "60",
-        target_dir: "tv/Captcha Show",
-        path_template: "{filename}",
-        enabled: "on",
-      }),
+  it("refuses pushes from unknown pages until there's a root folder", async () => {
+    const res = await post("/flash/add", { urls: "https://gofile.io/d/early", source: "https://early.example/c/1" });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("Add a root folder");
+  });
+
+  it("routes encrypted links to the title whose source page sent them", async () => {
+    const kdrama = addRootFolder(path.join(media, "Kdrama"));
+    const id = createTitle(
+      titleInput.parse({ type: "show", name: "Captcha Show", root_folder_id: kdrama, folder: "Captcha Show", season_folders: true, monitored: true }),
     );
+    createSource(id, sourceInput.parse({ url: "https://www.crate.example/folder/abc/", poll: false }));
     const res = await post("/flash/addcrypted2", {
       ...encrypt(["https://pixeldrain.com/u/aaa", "https://pixeldrain.com/u/bbb"]),
       passwords: "",
@@ -79,28 +86,29 @@ describe("Click'n'Load listener", () => {
     ]);
   });
 
-  it("creates a non-polled container for pages it doesn't know, using the Click'n'Load settings", async () => {
-    saveSettings({ cnlTargetDir: "incoming", cnlTemplate: "{container}/{filename}" });
+  it("creates a show with a non-polled source in the default show root for pages it doesn't know", async () => {
+    const tv = addRootFolder(path.join(media, "TV"));
+    saveSettings({ defaultShowRootId: tv, defaultSeasonFolders: false });
     await post("/flash/add", { urls: "https://gofile.io/d/xyz\nnot a link\n", source: "https://other.example/c/42" });
     await post("/flash/add", { urls: "https://gofile.io/d/xyz", source: "https://other.example/c/42/" });
 
-    const created = listContainers().find((c) => c.url === "https://other.example/c/42");
-    expect(created).toMatchObject({
-      name: "other.example 42",
-      poll: 0,
-      enabled: 1,
-      target_dir: "incoming",
-      path_template: "{container}/{filename}",
+    const source = sourceByUrl("https://other.example/c/42");
+    expect(source).toMatchObject({ poll: 0, enabled: 1, title_name: "other.example 42" });
+    expect(getTitle(source.title_id)).toMatchObject({
+      type: "show",
+      root_path: path.join(media, "TV"),
+      folder: "other.example 42",
+      season_folders: 0,
     });
-    expect(listLinks(created!.id).map((l) => l.url)).toEqual(["https://gofile.io/d/xyz"]);
+    expect(listLinks(source.title_id).map((l) => l.url)).toEqual(["https://gofile.io/d/xyz"]);
   });
 
-  it("uses a shared fallback container when there's no source", async () => {
+  it("uses a shared fallback title when there's no source page", async () => {
     await post("/flash/add", { urls: "https://mega.nz/file/a#k" });
     await post("/flash/add", { urls: "https://mega.nz/file/b#k" });
-    const fallback = listContainers().filter((c) => c.name === "Click'n'Load");
+    const fallback = listSources().filter((s) => s.title_name === "Click'n'Load");
     expect(fallback).toHaveLength(1);
-    expect(listLinks(fallback[0].id)).toHaveLength(2);
+    expect(listLinks(fallback[0].title_id)).toHaveLength(2);
   });
 
   it("rejects undecryptable payloads and oversized bodies", async () => {
@@ -154,8 +162,7 @@ describe("Click'n'Load v1 (DLC)", () => {
     } finally {
       globalThis.fetch = realFetch;
     }
-    const container = listContainers().find((c) => c.url === "https://dlc.example/c/7")!;
-    expect(listLinks(container.id).map((l) => l.url).sort()).toEqual([
+    expect(listLinks(sourceByUrl("https://dlc.example/c/7").title_id).map((l) => l.url).sort()).toEqual([
       "https://gofile.io/d/dlc1",
       "https://pixeldrain.com/u/dlc2",
     ]);

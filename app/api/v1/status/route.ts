@@ -1,12 +1,13 @@
 import { api } from "@/lib/api";
-import { listContainers } from "@/lib/containers";
+import { SCHEMA_VERSION } from "@/lib/db/migrations";
+import { listTitles } from "@/lib/titles";
 import { all } from "@/lib/db";
 import { totalSpeed } from "@/lib/links";
 import { HEARTBEAT_INTERVAL_MS, readDiskStatus, workerHeartbeatAge } from "@/lib/settings";
 import pkg from "@/package.json";
 
 export const GET = api(() => {
-  const containers = listContainers();
+  const titles = listTitles();
   const counts = Object.fromEntries(
     all<{ status: string; n: number }>("SELECT status, COUNT(*) AS n FROM links GROUP BY status").map((r) => [r.status, r.n]),
   );
@@ -15,11 +16,14 @@ export const GET = api(() => {
   return {
     version: pkg.version,
     worker: { online: heartbeat !== null && heartbeat < HEARTBEAT_INTERVAL_MS * 3, last_seen_ms: heartbeat },
-    containers: {
-      total: containers.length,
-      enabled: containers.filter((c) => c.enabled).length,
-      needs_attention: containers.filter((c) => c.enabled && c.status === "needs_attention").length,
-      error: containers.filter((c) => c.enabled && c.status === "error").length,
+    schema_version: SCHEMA_VERSION,
+    titles: {
+      total: titles.length,
+      shows: titles.filter((t) => t.type === "show").length,
+      movies: titles.filter((t) => t.type === "movie").length,
+      monitored: titles.filter((t) => t.monitored).length,
+      needs_attention: titles.filter((t) => t.status === "needs_attention").length,
+      error: titles.filter((t) => t.status === "error").length,
     },
     links: {
       downloading: (counts.downloading ?? 0) + (counts.resolving ?? 0),
@@ -29,6 +33,9 @@ export const GET = api(() => {
       offline: counts.offline ?? 0,
     },
     speed_bps: totalSpeed(),
-    disk: disk && { free_bytes: disk.freeBytes, total_bytes: disk.totalBytes, low: disk.low },
+    disk: disk && {
+      low: disk.low,
+      root_folders: disk.roots.map((r) => ({ path: r.path, free_bytes: r.freeBytes, total_bytes: r.totalBytes, low: r.low })),
+    },
   };
 });

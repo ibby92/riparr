@@ -6,9 +6,11 @@ import { ACCOUNT_FIELDS, listHostAccounts } from "@/lib/host-accounts";
 import { maskProxyUrl } from "@/lib/net";
 import { getSettings } from "@/lib/settings";
 import { logout } from "../auth-actions";
-import { newApiKey, saveAccount, setAuthentication } from "./actions";
+import { newApiKey, removeRootFolderAction, saveAccount, setAuthentication } from "./actions";
 import { PasswordForm } from "./security";
-import { IntegrationTests, SettingsForm } from "./settings-form";
+import { AddRootFolderForm, IntegrationTests, SettingsForm } from "./settings-form";
+import { formatBytes } from "../links-table";
+import { listRootFolders } from "@/lib/root-folders";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -29,12 +31,45 @@ async function Settings() {
   const mode = authMode();
   const username = currentUsername();
   const envOverride = process.env.RIPARR_AUTH === "none";
+  const settings = getSettings();
+  const roots = listRootFolders();
   return (
     <>
-      {/* The proxy password never reaches the browser. */}
+      <section className="card space-y-4 p-5">
+        <div>
+          <h2 className="text-lg font-semibold">Root folders</h2>
+          <p className="text-sm text-muted">
+            Where your library lives, as paths inside Riparr&apos;s container (e.g. your NAS <code>Videos</code> share mounted at{" "}
+            <code>/media</code>, with root folders <code>/media/Kdrama</code> and <code>/media/Movies</code>).
+          </p>
+        </div>
+        {roots.length > 0 && (
+          <ul className="divide-y divide-border rounded-md border border-border text-sm">
+            {roots.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center gap-3 px-3 py-2">
+                <code className="min-w-0 flex-1 break-all">{r.path}</code>
+                <span className="text-xs text-muted">
+                  {r.accessible ? `${formatBytes(r.free_bytes)} free` : "not reachable"} · {r.title_count} title(s)
+                </span>
+                <form action={removeRootFolderAction}>
+                  <input type="hidden" name="id" value={r.id} />
+                  <button className="btn btn-danger" disabled={r.title_count > 0} title={r.title_count ? "Titles still use it" : undefined}>
+                    Remove
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
+        <AddRootFolderForm />
+      </section>
+
+      {/* Secrets (proxy password, TMDB key) never reach the browser. */}
       <SettingsForm
-        settings={{ ...getSettings(), proxyUrl: maskProxyUrl(getSettings().proxyUrl) }}
+        settings={{ ...settings, proxyUrl: maskProxyUrl(settings.proxyUrl), tmdbApiKey: "" }}
         envProxy={Boolean(process.env.RIPARR_PROXY_URL)}
+        roots={roots.map((r) => ({ id: r.id, path: r.path }))}
+        tmdbKeySet={Boolean(settings.tmdbApiKey)}
       />
       <IntegrationTests />
 

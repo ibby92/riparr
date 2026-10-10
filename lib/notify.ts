@@ -3,7 +3,8 @@ import { getSettings, NOTIFY_EVENTS, type NotifyEvent } from "./settings";
 export type Notification = {
   event: NotifyEvent | "test";
   message: string;
-  container?: { id: number; name: string } | null;
+  /** The title this is about. Only its id and name are ever sent. */
+  subject?: { id: number; name: string } | null;
 };
 
 const TIMEOUT_MS = 10_000;
@@ -32,9 +33,9 @@ export async function notify(n: Notification, fetchImpl: typeof fetch = fetch): 
   if (n.event !== "test" && !settings.notifyEvents.includes(n.event)) return [];
 
   const title = n.event === "test" ? "Riparr test notification" : `Riparr: ${NOTIFY_EVENTS[n.event]}`;
-  const body = n.container ? `${n.container.name}: ${n.message}` : n.message;
-  // Callers may pass a full container row; only id and name ever leave the box.
-  const container = n.container ? { id: n.container.id, name: n.container.name } : null;
+  const body = n.subject ? `${n.subject.name}: ${n.message}` : n.message;
+  // Callers may pass a full title row; only id and name ever leave the box.
+  const media = n.subject ? { id: n.subject.id, name: n.subject.name } : null;
   const sends: Promise<void>[] = [];
 
   if (settings.notifyWebhookUrl) {
@@ -44,7 +45,7 @@ export async function notify(n: Notification, fetchImpl: typeof fetch = fetch): 
         settings.notifyWebhookUrl,
         isDiscord(url)
           ? { username: "Riparr", content: `**${title}**\n${body}` }
-          : { event: n.event, title, message: n.message, container, timestamp: new Date().toISOString() },
+          : { event: n.event, title, message: n.message, media, timestamp: new Date().toISOString() },
         fetchImpl,
       ),
     );

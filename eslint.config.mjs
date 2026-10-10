@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Bundled worker output.
     "dist/**",
+    // Design prototypes and one-off asset tooling (not app code).
+    "design/**",
   ]),
 ]);
 

@@ -1,5 +1,6 @@
 import { all, getDb, one, run } from "./db";
 import type { LinkMeta } from "./crawlers/types";
+import { parseEpisode, type EpisodeRef } from "./episodes";
 import { hostIdFor, normalizeLinkUrl } from "./hosts";
 
 export type LinkStatus =
@@ -18,7 +19,9 @@ export type FileStatus = "queued" | "downloading" | "done" | "failed" | "skipped
 
 export type Link = {
   id: number;
-  container_id: number;
+  title_id: number;
+  /** The source that first listed this link; null if that source was removed. */
+  source_id: number | null;
   url: string;
   fingerprint: string;
   host: string;
@@ -31,7 +34,7 @@ export type Link = {
   archive_password: string | null;
   /** When the link's files became known; null until first resolved. */
   resolved_at: number | null;
-  /** Details the container published for this link, if any. */
+  /** Details the source published for this link, if any. */
   label: string | null;
   episode: string | null;
   quality: string | null;
@@ -39,7 +42,7 @@ export type Link = {
 };
 
 export type LinkWithProgress = Link & {
-  container_name: string;
+  title_name: string;
   /** Combined speed of the link's files that are downloading right now. */
   speed_bps: number;
   file_count: number;
@@ -65,6 +68,8 @@ export type FileRow = {
   error: string | null;
   updated_at: number;
   speed_bps: number;
+  season: number | null;
+  episode: number | null;
 };
 
 /**
@@ -72,7 +77,8 @@ export type FileRow = {
  * `archivePassword` (e.g. from Click'n'Load) is kept for extraction.
  */
 export function addLinks(
-  containerId: number,
+  titleId: number,
+  sourceId: number | null,
   urls: string[],
   archivePassword: string | null = null,
   meta: LinkMeta[] = [],
@@ -80,10 +86,10 @@ export function addLinks(
   const db = getDb();
   const byUrl = new Map(meta.map((m) => [m.url, m]));
   const insert = db.prepare(
-    `INSERT INTO links (container_id, url, fingerprint, host, discovered_at, updated_at, archive_password,
+    `INSERT INTO links (title_id, source_id, url, fingerprint, host, discovered_at, updated_at, archive_password,
                         label, episode, quality, size_text)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (container_id, fingerprint) DO NOTHING`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (title_id, fingerprint) DO NOTHING`,
   );
   const now = Date.now();
   let added = 0;
@@ -92,7 +98,8 @@ export function addLinks(
     for (const url of urls) {
       const m = byUrl.get(url);
       const result = insert.run(
-        containerId,
+        titleId,
+        sourceId,
         url,
         normalizeLinkUrl(url),
         hostIdFor(url),
@@ -115,7 +122,7 @@ export function addLinks(
 }
 
 const WITH_PROGRESS = `
-  SELECT l.*, c.name AS container_name,
+  SELECT l.*, t.name AS title_name,
          COUNT(f.id) AS file_count,
          COALESCE(SUM(f.status IN ('done', 'skipped')), 0) AS files_done,
          COALESCE(SUM(f.status = 'standby'), 0) AS files_standby,
@@ -123,13 +130,13 @@ const WITH_PROGRESS = `
          COALESCE(SUM(CASE WHEN f.status = 'downloading' THEN f.speed_bps ELSE 0 END), 0) AS speed_bps,
          CASE WHEN COUNT(f.id) = 0 OR COUNT(f.size) < COUNT(f.id) THEN NULL ELSE SUM(f.size) END AS bytes_total
     FROM links l
-    JOIN containers c ON c.id = l.container_id
+    JOIN titles t ON t.id = l.title_id
     LEFT JOIN files f ON f.link_id = l.id`;
 
-export function listLinks(containerId: number): LinkWithProgress[] {
+export function listLinks(titleId: number): LinkWithProgress[] {
   return all<LinkWithProgress>(
-    `${WITH_PROGRESS} WHERE l.container_id = ? GROUP BY l.id ORDER BY l.discovered_at DESC, l.id DESC`,
-    containerId,
+    `${WITH_PROGRESS} WHERE l.title_id = ? GROUP BY l.id ORDER BY l.discovered_at DESC, l.id DESC`,
+    titleId,
   );
 }
 
@@ -166,22 +173,22 @@ export function totalSpeed(): number {
   return one<{ s: number }>("SELECT COALESCE(SUM(speed_bps), 0) AS s FROM files WHERE status = 'downloading'")?.s ?? 0;
 }
 
-/** Links of a container that are still waiting or in flight. */
-export function pendingLinkCount(containerId: number): number {
+/** Links of a title that are still waiting or in flight. */
+export function pendingLinkCount(titleId: number): number {
   return (
     one<{ n: number }>(
-      "SELECT COUNT(*) AS n FROM links WHERE container_id = ? AND status IN ('new', 'queued', 'resolving', 'downloading')",
-      containerId,
+      "SELECT COUNT(*) AS n FROM links WHERE title_id = ? AND status IN ('new', 'queued', 'resolving', 'downloading')",
+      titleId,
     )?.n ?? 0
   );
 }
 
-const READY = `c.enabled = 1 AND l.status IN ('new', 'queued') AND (l.retry_at IS NULL OR l.retry_at <= ?)`;
+const READY = `t.monitored = 1 AND l.status IN ('new', 'queued') AND (l.retry_at IS NULL OR l.retry_at <= ?)`;
 
 /** Links whose files aren't known yet and are ready to be resolved. */
 export function unresolvedLinks(now = Date.now(), limit = 100): Link[] {
   return all<Link>(
-    `SELECT l.* FROM links l JOIN containers c ON c.id = l.container_id
+    `SELECT l.* FROM links l JOIN titles t ON t.id = l.title_id
       WHERE ${READY} AND l.resolved_at IS NULL
       ORDER BY l.discovered_at, l.id LIMIT ?`,
     now,
@@ -192,7 +199,7 @@ export function unresolvedLinks(now = Date.now(), limit = 100): Link[] {
 /** Resolved links with at least one file chosen for download. */
 export function downloadableLinks(now = Date.now(), limit = 100): Link[] {
   return all<Link>(
-    `SELECT l.* FROM links l JOIN containers c ON c.id = l.container_id
+    `SELECT l.* FROM links l JOIN titles t ON t.id = l.title_id
       WHERE ${READY} AND l.resolved_at IS NOT NULL
         AND EXISTS (SELECT 1 FROM files f WHERE f.link_id = l.id AND f.status = 'queued')
       ORDER BY l.discovered_at, l.id LIMIT ?`,
@@ -205,24 +212,24 @@ export function markResolved(id: number) {
   run("UPDATE links SET resolved_at = ?, status = 'queued', error = NULL, attempts = 0, retry_at = NULL, updated_at = ? WHERE id = ?", Date.now(), Date.now(), id);
 }
 
-/** Containers with links still in play, i.e. where mirror selection may have work. */
-export function containersWithActiveLinks(): number[] {
+/** Titles with links still in play, i.e. where mirror selection may have work. */
+export function titlesWithActiveLinks(): number[] {
   return all<{ id: number }>(
-    "SELECT DISTINCT container_id AS id FROM links WHERE status IN ('new', 'queued', 'resolving', 'downloading')",
+    "SELECT DISTINCT title_id AS id FROM links WHERE status IN ('new', 'queued', 'resolving', 'downloading')",
   ).map((r) => r.id);
 }
 
-/** True while freshly found links of the container are still being resolved; selection waits for them. */
-export function resolvingInProgress(containerId: number): boolean {
+/** True while freshly found links of the title are still being resolved; selection waits for them. */
+export function resolvingInProgress(titleId: number): boolean {
   return (
     (one<{ n: number }>(
-      "SELECT COUNT(*) AS n FROM links WHERE container_id = ? AND resolved_at IS NULL AND status IN ('new', 'resolving')",
-      containerId,
+      "SELECT COUNT(*) AS n FROM links WHERE title_id = ? AND resolved_at IS NULL AND status IN ('new', 'resolving')",
+      titleId,
     )?.n ?? 0) > 0
   );
 }
 
-export type ContainerFile = {
+export type TitleFile = {
   fileId: number;
   linkId: number;
   host: string;
@@ -236,15 +243,15 @@ export type ContainerFile = {
   linkResolvedAt: number | null;
 };
 
-/** Every file of a container with its link's state, for mirror selection and settling. */
-export function containerFiles(containerId: number): ContainerFile[] {
-  return all<ContainerFile>(
+/** Every file of a title (across all its sources) with its link's state, for mirror selection and settling. */
+export function titleFiles(titleId: number): TitleFile[] {
+  return all<TitleFile>(
     `SELECT f.id AS fileId, l.id AS linkId, l.host, f.remote_name AS name, f.dir, f.size,
             f.status AS fileStatus, l.status AS linkStatus, l.discovered_at AS linkDiscoveredAt,
             l.retry_at AS linkRetryAt, l.resolved_at AS linkResolvedAt
        FROM files f JOIN links l ON l.id = f.link_id
-      WHERE l.container_id = ?`,
-    containerId,
+      WHERE l.title_id = ?`,
+    titleId,
   );
 }
 
@@ -317,20 +324,27 @@ export function recoverInterrupted() {
 export function upsertFiles(
   linkId: number,
   files: { key: string; name: string; dir: string; size: number | null; hash: string | null }[],
+  /** Episode from the link's own details, used when a file name has none. */
+  fallbackEpisode: EpisodeRef | null = null,
 ): FileRow[] {
   const db = getDb();
   // New files start on standby; mirror selection decides which copy downloads.
   const upsert = db.prepare(
-    `INSERT INTO files (link_id, key, remote_name, dir, size, hash, updated_at, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'standby')
+    `INSERT INTO files (link_id, key, remote_name, dir, size, hash, updated_at, status, season, episode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'standby', ?, ?)
      ON CONFLICT (link_id, key) DO UPDATE
         SET remote_name = excluded.remote_name, dir = excluded.dir,
-            size = excluded.size, hash = excluded.hash`,
+            size = excluded.size, hash = excluded.hash,
+            season = excluded.season, episode = excluded.episode`,
   );
   const now = Date.now();
   db.exec("BEGIN IMMEDIATE");
   try {
-    for (const f of files) upsert.run(linkId, f.key, f.name, f.dir, f.size, f.hash, now);
+    for (const f of files) {
+      // Single-file links take the link's episode; folder files need their own marker.
+      const ep = parseEpisode(f.name) ?? (files.length === 1 ? fallbackEpisode : null);
+      upsert.run(linkId, f.key, f.name, f.dir, f.size, f.hash, now, ep?.season ?? null, ep?.episode ?? null);
+    }
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
@@ -362,9 +376,9 @@ export type ExtractionRow = {
   updated_at: number;
 };
 
-export function listExtractions(containerId: number): ExtractionRow[] {
+export function listExtractions(titleId: number): ExtractionRow[] {
   return all<ExtractionRow>(
-    "SELECT id, entry_path, status, error, files, updated_at FROM extractions WHERE container_id = ? ORDER BY updated_at DESC",
-    containerId,
+    "SELECT id, entry_path, status, error, files, updated_at FROM extractions WHERE title_id = ? ORDER BY updated_at DESC",
+    titleId,
   );
 }

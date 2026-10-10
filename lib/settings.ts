@@ -40,9 +40,15 @@ export type AppSettings = {
   /** New downloads wait while the downloads volume has less free space than this (GB); 0 = off. */
   minFreeGb: number;
   cnlEnabled: boolean;
-  /** Where Click'n'Load links from unknown pages go, relative to the downloads folder. */
-  cnlTargetDir: string;
-  cnlTemplate: string;
+  /** Root folder for new shows (and Click'n'Load from unknown pages); null = first root folder. */
+  defaultShowRootId: number | null;
+  /** Root folder for new movies; null = first root folder. */
+  defaultMovieRootId: number | null;
+  /** Whether new shows get Season NN folders. */
+  defaultSeasonFolders: boolean;
+  /** TMDB API key (v3 key or v4 read token) for search, posters and episode counts. Secret. */
+  tmdbApiKey: string;
+  tmdbLanguage: string;
   /** Extract finished archives (zip/rar/7z, incl. multi-part) in place. */
   extractEnabled: boolean;
   /** Delete archive volumes after a successful extraction. */
@@ -67,8 +73,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   minFreeGb: 5,
   hostPriority: ["gofile", "pixeldrain", "mega"],
   cnlEnabled: true,
-  cnlTargetDir: "clicknload",
-  cnlTemplate: "{container}/{dir}/{filename}",
+  defaultShowRootId: null,
+  defaultMovieRootId: null,
+  defaultSeasonFolders: true,
+  tmdbApiKey: "",
+  tmdbLanguage: "en-US",
   extractEnabled: true,
   extractDeleteArchives: false,
   proxyUrl: "",
@@ -86,8 +95,11 @@ const SETTING_KEYS: Record<keyof AppSettings, string> = {
   minFreeGb: "downloads.min_free_gb",
   hostPriority: "downloads.host_priority",
   cnlEnabled: "cnl.enabled",
-  cnlTargetDir: "cnl.target_dir",
-  cnlTemplate: "cnl.template",
+  defaultShowRootId: "media.default_show_root",
+  defaultMovieRootId: "media.default_movie_root",
+  defaultSeasonFolders: "media.season_folders",
+  tmdbApiKey: "metadata.tmdb_api_key",
+  tmdbLanguage: "metadata.tmdb_language",
   extractEnabled: "extract.enabled",
   extractDeleteArchives: "extract.delete_archives",
   proxyUrl: "proxy.url",
@@ -115,7 +127,9 @@ export function saveSettings(settings: Partial<AppSettings>) {
 
 const DISK_KEY = "worker.disk";
 
-export type DiskStatus = { freeBytes: number; totalBytes: number; low: boolean; checkedAt: number };
+export type RootDiskStatus = { path: string; freeBytes: number | null; totalBytes: number | null; low: boolean };
+/** Free space per root folder; `low` if any root is below the floor. */
+export type DiskStatus = { roots: RootDiskStatus[]; low: boolean; checkedAt: number };
 
 /** Written by the worker; read by the dashboard and API. */
 export function writeDiskStatus(status: DiskStatus) {

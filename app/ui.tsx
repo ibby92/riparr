@@ -1,4 +1,4 @@
-import type { ContainerStatus } from "@/lib/containers";
+import type { TitleStatus } from "@/lib/titles";
 import type { EventLevel, RiparrEvent } from "@/lib/events";
 
 export function formatAgo(ts: number | null, now = Date.now()): string {
@@ -12,15 +12,16 @@ export function formatAgo(ts: number | null, now = Date.now()): string {
   return future ? `in ${text}` : `${text} ago`;
 }
 
-const STATUS_STYLES: Record<ContainerStatus, [string, string]> = {
+const STATUS_STYLES: Record<TitleStatus, [string, string]> = {
   pending: ["Pending", "bg-zinc-500/15 text-muted"],
   ok: ["OK", "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"],
   needs_attention: ["Needs attention", "bg-amber-500/15 text-amber-600 dark:text-amber-400"],
   error: ["Error", "bg-red-500/15 text-red-600 dark:text-red-400"],
+  paused: ["Paused", "bg-zinc-500/15 text-muted"],
 };
 
-export function StatusBadge({ status, enabled = true }: { status: ContainerStatus; enabled?: boolean }) {
-  const [label, style] = enabled ? STATUS_STYLES[status] : ["Paused", "bg-zinc-500/15 text-muted"];
+export function StatusBadge({ status }: { status: TitleStatus }) {
+  const [label, style] = STATUS_STYLES[status];
   return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${style}`}>{label}</span>;
 }
 
@@ -33,11 +34,11 @@ const LEVEL_STYLES: Record<EventLevel, string> = {
 export function EventList({
   events,
   now,
-  showContainer = true,
+  showTitle = true,
 }: {
   events: RiparrEvent[];
   now: number;
-  showContainer?: boolean;
+  showTitle?: boolean;
 }) {
   if (events.length === 0) return <p className="p-4 text-sm text-muted">No activity yet.</p>;
   return (
@@ -49,7 +50,7 @@ export function EventList({
           </span>
           <span className={`w-10 shrink-0 uppercase ${LEVEL_STYLES[e.level]}`}>{e.level}</span>
           <span className="min-w-0 break-words">
-            {showContainer && e.container_name && <span className="font-medium">{e.container_name}: </span>}
+            {showTitle && e.title_name && <span className="font-medium">{e.title_name}: </span>}
             {e.message}
           </span>
         </li>

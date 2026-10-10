@@ -1,0 +1,64 @@
+{
+  "page": 1,
+  "results": [
+    {
+      "backdrop_path": "/bd1.jpg",
+      "id": 61374,
+      "name": "Doctor X: Surgeon Michiko Daimon",
+      "original_name": "ドクターX～外科医・大門未知子～",
+      "overview": "A freelance surgeon who never fails.",
+      "poster_path": "/poster61374.jpg",
+      "media_type": "tv",
+      "adult": false,
+      "original_language": "ja",
+      "genre_ids": [18],
+      "popularity": 21.5,
+      "first_air_date": "2012-10-18",
+      "vote_average": 7.4,
+      "vote_count": 40,
+      "origin_country": ["JP"]
+    },
+    {
+      "adult": false,
+      "id": 1987,
+      "name": "Some Doctor",
+      "original_name": "Some Doctor",
+      "media_type": "person",
+      "popularity": 3.2,
+      "gender": 1,
+      "known_for_department": "Acting",
+      "profile_path": "/p.jpg",
+      "known_for": []
+    },
+    {
+      "backdrop_path": null,
+      "id": 1043905,
+      "title": "Doctor X: The Movie",
+      "original_title": "劇場版ドクターX",
+      "overview": "",
+      "poster_path": null,
+      "media_type": "movie",
+      "adult": false,
+      "original_language": "ja",
+      "genre_ids": [18],
+      "popularity": 4.1,
+      "release_date": "2024-12-06",
+      "video": false,
+      "vote_average": 0,
+      "vote_count": 0
+    },
+    {
+      "id": 99,
+      "name": "Doctor X: Mafia in White",
+      "original_name": "닥터 X: 하얀 마피아의 시대",
+      "overview": "",
+      "poster_path": "/dx.jpg",
+      "media_type": "tv",
+      "popularity": 9.9,
+      "first_air_date": "",
+      "origin_country": ["KR"]
+    }
+  ],
+  "total_pages": 1,
+  "total_results": 4
+}

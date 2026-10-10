@@ -1,12 +1,13 @@
 import { closeDb, getDb } from "@/lib/db";
 import { pruneCommands, takeCommands, type Command } from "@/lib/commands";
-import { getContainer, scheduleCheckNow } from "@/lib/containers";
+import { getSource, scheduleCheckNow, scheduleTitleCheckNow } from "@/lib/sources";
 import { recoverInterrupted } from "@/lib/links";
 import { logEvent, pruneEvents } from "@/lib/events";
 import { getSettings, HEARTBEAT_INTERVAL_MS, writeHeartbeat } from "@/lib/settings";
 import { startCnlServer } from "./cnl-server";
 import { linkSettled, resetFailedExtractions, stopExtraction } from "./extract-runner";
-import { cancelContainer, cancelLink, scheduleDownloads } from "./pipeline";
+import { checkAllRoots } from "./disk";
+import { cancelLink, cancelTitle, scheduleDownloads } from "./pipeline";
 import { runDueChecks } from "./scheduler";
 
 const TICK_MS = 2_000;
@@ -17,21 +18,25 @@ const shutdown = new AbortController();
 function handle(command: Command) {
   switch (command.type) {
     case "check_now": {
-      const container = getContainer(command.containerId);
-      if (!container) return;
-      scheduleCheckNow(container.id);
-      logEvent("info", "Manual check requested", container.id);
+      const source = getSource(command.sourceId);
+      if (!source) return;
+      scheduleCheckNow(source.id);
+      logEvent("info", "Manual check requested", source.title_id);
       break;
     }
+    case "check_title":
+      scheduleTitleCheckNow(command.titleId);
+      logEvent("info", "Manual check requested", command.titleId);
+      break;
     case "cancel_link":
       cancelLink(command.linkId);
       break;
-    case "cancel_container":
-      cancelContainer(command.containerId);
+    case "cancel_title":
+      cancelTitle(command.titleId);
       break;
-    case "extract_container":
-      resetFailedExtractions(command.containerId);
-      linkSettled(command.containerId); // rescans now, or when its downloads finish
+    case "extract_title":
+      resetFailedExtractions(command.titleId);
+      linkSettled(command.titleId); // rescans now, or when its downloads finish
       break;
   }
 }
@@ -72,12 +77,15 @@ async function main() {
       }
     }, TICK_MS),
     setInterval(writeHeartbeat, HEARTBEAT_INTERVAL_MS),
+    // Free space per root folder, for the dashboard (downloads also check before starting).
+    setInterval(() => checkAllRoots(), 60_000),
     setInterval(() => {
       pruneEvents(30 * DAY);
       pruneCommands(DAY);
     }, 60 * 60 * 1000),
   ];
   tick();
+  checkAllRoots();
   const cnl = await startClickNLoad();
 
   const stop = (signal: string) => {

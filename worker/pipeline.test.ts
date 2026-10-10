@@ -6,19 +6,22 @@ import path from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-// End-to-end: container page (CNL2) -> link diff -> resolve -> download -> templated path.
+// End-to-end: source page (CNL2, crate-api) -> link diff -> resolve -> mirror selection -> download -> title folder.
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "riparr-pipeline-"));
 process.env.RIPARR_CONFIG_DIR = path.join(tmp, "config");
-process.env.RIPARR_DOWNLOADS_DIR = path.join(tmp, "downloads");
+const downloads = path.join(tmp, "downloads");
+fs.mkdirSync(downloads, { recursive: true });
 
 const { closeDb } = await import("@/lib/db");
-const { containerInput, createContainer, getContainer } = await import("@/lib/containers");
+const { addRootFolder } = await import("@/lib/root-folders");
+const { createSource, getSource, listSources, sourceInput } = await import("@/lib/sources");
+const { createTitle, titleInput } = await import("@/lib/titles");
 const { HostOfflineError } = await import("@/lib/errors");
 const { RESOLVERS } = await import("@/lib/hosts");
 const { httpOpener } = await import("@/lib/hosts/http");
 const { listFiles, listLinks } = await import("@/lib/links");
-const { checkContainer } = await import("./check");
+const { checkSource } = await import("./check");
 const { scheduleDownloads } = await import("./pipeline");
 const { findSevenZip } = await import("./extract");
 const { makeCrateSite } = await import("@/lib/crawlers/crate-fixture");
@@ -162,13 +165,39 @@ afterAll(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-async function drain(containerId: number, timeoutMs = 10_000) {
+let rootId = 0;
+
+/** A show in the test's downloads root with one polled source. */
+function addTitle(opts: { name: string; url: string; folder: string; naming?: string; password?: string; seasonFolders?: boolean }) {
+  rootId ||= addRootFolder(downloads);
+  const id = createTitle(
+    titleInput.parse({
+      type: "show",
+      name: opts.name,
+      root_folder_id: rootId,
+      folder: opts.folder,
+      season_folders: opts.seasonFolders ?? false,
+      naming: opts.naming ?? "{filename}",
+      monitored: true,
+    }),
+  );
+  createSource(id, sourceInput.parse({ url: opts.url, password: opts.password ?? "" }));
+  return id;
+}
+
+/** Polls the title's (only) source, like the scheduler would. */
+async function check(titleId: number, signal = new AbortController().signal) {
+  const source = listSources(titleId)[0];
+  return checkSource(getSource(source.id)!, signal);
+}
+
+async function drain(titleId: number, timeoutMs = 10_000) {
   const shutdown = new AbortController();
   const deadline = Date.now() + timeoutMs;
   try {
     for (;;) {
       scheduleDownloads(shutdown.signal);
-      const links = listLinks(containerId);
+      const links = listLinks(titleId);
       if (links.every((l) => !["new", "queued", "resolving", "downloading"].includes(l.status))) return links;
       if (Date.now() > deadline) throw new Error(`Timed out: ${JSON.stringify(links.map((l) => l.status))}`);
       await new Promise((r) => setTimeout(r, 25));
@@ -183,21 +212,10 @@ describe("pipeline", () => {
   const signal = new AbortController().signal;
   const downloaded = (name: string) => path.join(tmp, "downloads", "tv", "Show", name);
 
-  it("discovers links from a CNL2 container and downloads them into the template path", async () => {
-    id = createContainer(
-      containerInput.parse({
-        name: "Show",
-        url: `${base}/crate`,
-        password: "",
-        poll_interval_min: "30",
-        target_dir: "tv",
-        path_template: "{container}/{dir}/{filename}",
-        enabled: "on",
-        poll: "on",
-      }),
-    );
+  it("discovers links from a CNL2 page and downloads them into the title folder", async () => {
+    id = addTitle({ name: "Show", url: `${base}/crate`, folder: "tv/Show", naming: "{dir}/{filename}" });
 
-    const first = await checkContainer(getContainer(id)!, signal);
+    const first = await check(id, signal);
     expect(first).toMatchObject({ status: "ok", newLinks: 2, source: "cnl2" });
 
     const links = await drain(id);
@@ -207,17 +225,17 @@ describe("pipeline", () => {
     ]);
     expect(fs.readFileSync(downloaded("a.bin")).equals(files["a.bin"])).toBe(true);
     expect(fs.readFileSync(downloaded("b.bin")).equals(files["b.bin"])).toBe(true);
-    expect(listFiles(links[0].id)[0]).toMatchObject({ status: "done", local_path: expect.stringMatching(/^tv\/Show\//) });
+    expect(listFiles(links[0].id)[0]).toMatchObject({ status: "done", local_path: expect.stringMatching(new RegExp(`^${downloads}/tv/Show/`)) });
     expect(fs.readdirSync(path.join(tmp, "downloads", ".riparr-partial"))).toEqual([]);
   });
 
   it("re-polling finds nothing new", async () => {
-    expect(await checkContainer(getContainer(id)!, signal)).toMatchObject({ newLinks: 0 });
+    expect(await check(id, signal)).toMatchObject({ newLinks: 0 });
   });
 
-  it("downloads only content added to the container later, and marks dead links offline", async () => {
+  it("downloads only content added to the source later, and marks dead links offline", async () => {
     published = ["a.bin", "b.bin", "c.bin", "gone.bin"];
-    expect(await checkContainer(getContainer(id)!, signal)).toMatchObject({ newLinks: 2 });
+    expect(await check(id, signal)).toMatchObject({ newLinks: 2 });
 
     const links = await drain(id);
     const byName = Object.fromEntries(links.map((l) => [path.basename(l.url), l.status]));
@@ -231,30 +249,19 @@ describe("pipeline", () => {
 const sevenZip = await findSevenZip();
 
 describe.skipIf(!sevenZip)("pipeline + extraction", () => {
-  it("extracts a downloaded password-protected archive with the container's password", async () => {
+  it("extracts a downloaded password-protected archive with the source's password", async () => {
     const work = fs.mkdtempSync(path.join(tmp, "zip-"));
     fs.writeFileSync(path.join(work, "Episode 01.mkv"), crypto.randomBytes(30_000));
     execFileSync(sevenZip!, ["a", "-tzip", "-ps3cret", "-mem=AES256", path.join(work, "show.zip"), path.join(work, "Episode 01.mkv")]);
     files["show.zip"] = fs.readFileSync(path.join(work, "show.zip"));
 
-    const id = createContainer(
-      containerInput.parse({
-        name: "Zipped",
-        url: `${base}/crate2`,
-        password: "s3cret",
-        poll_interval_min: "30",
-        target_dir: "tv",
-        path_template: "{container}/{filename}",
-        enabled: "on",
-        poll: "on",
-      }),
-    );
-    expect(await checkContainer(getContainer(id)!, new AbortController().signal)).toMatchObject({ newLinks: 1 });
+    const id = addTitle({ name: "Zipped", url: `${base}/crate2`, folder: "tv/Zipped", password: "s3cret" });
+    expect(await check(id, new AbortController().signal)).toMatchObject({ newLinks: 1 });
     await drain(id);
 
     const extraction = async () => {
       for (let i = 0; i < 200; i++) {
-        const row = one<{ status: string; files: number }>("SELECT status, files FROM extractions WHERE container_id = ?", id);
+        const row = one<{ status: string; files: number }>("SELECT status, files FROM extractions WHERE title_id = ?", id);
         if (row && row.status !== "incomplete") return row;
         await new Promise((r) => setTimeout(r, 25));
       }
@@ -271,22 +278,11 @@ describe("pipeline + preferred hosts", () => {
   const signal = new AbortController().signal;
   let n = 0;
 
-  async function mirrorContainer(links: string[]) {
+  async function mirrorTitle(links: string[]) {
     const key = `m${++n}`;
     mirrorCrates[key] = links;
-    const id = createContainer(
-      containerInput.parse({
-        name: `Mirrors ${key}`,
-        url: `${base}/mcrate/${key}`,
-        password: "",
-        poll_interval_min: "30",
-        target_dir: "mirrors",
-        path_template: "{container}/{filename}",
-        enabled: "on",
-        poll: "on",
-      }),
-    );
-    await checkContainer(getContainer(id)!, signal);
+    const id = addTitle({ name: `Mirrors ${key}`, url: `${base}/mcrate/${key}`, folder: `mirrors/Mirrors ${key}` });
+    await check(id, signal);
     return id;
   }
   const statuses = (id: number) => Object.fromEntries(listLinks(id).map((l) => [l.host, l.status]));
@@ -299,7 +295,7 @@ describe("pipeline + preferred hosts", () => {
   });
 
   it("downloads each file once, from the preferred host, and marks the other link as a mirror", async () => {
-    const id = await mirrorContainer(["/a/m1.bin", "/b/m1.bin"]); // less preferred host listed first
+    const id = await mirrorTitle(["/a/m1.bin", "/b/m1.bin"]); // less preferred host listed first
     await drain(id);
     expect(statuses(id)).toEqual({ hosta: "mirror", hostb: "done" });
     expect(hitsFor("m1.bin")).toEqual(["b:m1.bin"]);
@@ -308,7 +304,7 @@ describe("pipeline + preferred hosts", () => {
 
   it("falls back to the next host when the preferred copy is gone", async () => {
     rawStatus.set("b:m2.bin", 404);
-    const id = await mirrorContainer(["/b/m2.bin", "/a/m2.bin"]);
+    const id = await mirrorTitle(["/b/m2.bin", "/a/m2.bin"]);
     await drain(id);
     expect(statuses(id)).toEqual({ hosta: "done", hostb: "offline" });
     expect(hitsFor("m2.bin")).toEqual(["b:m2.bin", "a:m2.bin"]);
@@ -317,7 +313,7 @@ describe("pipeline + preferred hosts", () => {
 
   it("uses another host instead of waiting out a rate limit", async () => {
     rawStatus.set("b:m3.bin", 429);
-    const id = await mirrorContainer(["/b/m3.bin", "/a/m3.bin"]);
+    const id = await mirrorTitle(["/b/m3.bin", "/a/m3.bin"]);
     await drain(id);
     // hostb's link would retry in an hour; its file was covered by hosta meanwhile.
     expect(statuses(id)).toEqual({ hosta: "done", hostb: "mirror" });
@@ -326,7 +322,7 @@ describe("pipeline + preferred hosts", () => {
   });
 });
 
-describe("polling a JS-rendered container for new content", () => {
+describe("polling a JS-rendered source for new content", () => {
   const signal = new AbortController().signal;
   const episode = (ep: string) => {
     const label = `Polled.Show.${ep}.1080p.mkv`;
@@ -345,34 +341,24 @@ describe("polling a JS-rendered container for new content", () => {
   it("downloads what's there, then picks up an episode added later", async () => {
     (await import("@/lib/settings")).saveSettings({ hostPriority: ["hostb", "hosta"] });
     const e01 = episode("S01E01");
-    const id = createContainer(
-      containerInput.parse({
-        name: "Polled Show",
-        url: `${base}/c/polltest`,
-        password: "",
-        poll_interval_min: "30",
-        target_dir: "tv",
-        path_template: "{container}/{filename}",
-        enabled: "on",
-        poll: "on",
-      }),
-    );
+    // Season folders on: episodes land in "Polled Show/Season 01".
+    const id = addTitle({ name: "Polled Show", url: `${base}/c/polltest`, folder: "tv/Polled Show", seasonFolders: true });
 
-    expect(await checkContainer(getContainer(id)!, signal)).toMatchObject({ status: "ok", newLinks: 3, source: "crate-api" });
+    expect(await check(id, signal)).toMatchObject({ status: "ok", newLinks: 3, source: "crate-api" });
     await drain(id);
     expect(byHost(id, "S01E01")).toEqual({ hostb: "done", hosta: "mirror", "unsupported-host.example": "ignored" });
     expect(listLinks(id).find((l) => l.host === "hostb")).toMatchObject({ label: e01, quality: "1080p", size_text: "15 KB" });
 
     // Nothing new: the next poll adds nothing.
-    expect(await checkContainer(getContainer(id)!, signal)).toMatchObject({ newLinks: 0 });
+    expect(await check(id, signal)).toMatchObject({ newLinks: 0 });
 
     // The site adds the next episode; the next poll registers and downloads just that.
     const e02 = episode("S01E02");
-    expect(await checkContainer(getContainer(id)!, signal)).toMatchObject({ newLinks: 3 });
+    expect(await check(id, signal)).toMatchObject({ newLinks: 3 });
     await drain(id);
     expect(byHost(id, "S01E02")).toEqual({ hostb: "done", hosta: "mirror", "unsupported-host.example": "ignored" });
 
-    const dir = path.join(tmp, "downloads", "tv", "Polled Show");
+    const dir = path.join(tmp, "downloads", "tv", "Polled Show", "Season 01");
     expect(fs.readdirSync(dir).sort()).toEqual([e01, e02]);
     expect(fs.readFileSync(path.join(dir, e02)).equals(files[e02])).toBe(true);
     expect(hitsFor(e01)).toEqual([`b:${e01}`]);

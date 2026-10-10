@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
+import { backupDatabase } from "./backup";
 import { migrate } from "./migrations";
 
 // Defaults are relative to the working directory (dev). Written without
@@ -25,7 +26,8 @@ export function getDb(): DatabaseSync {
     db.exec("PRAGMA busy_timeout = 5000");
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA foreign_keys = ON");
-    migrate(db);
+    // Every upgrade of an existing database is preceded by a backup in /config/backups.
+    migrate(db, { downloadsRoot: downloadsRoot() }, (from) => backupDatabase(db, configDir(), `v${from}`));
     g.__riparrDb = db;
   }
   return g.__riparrDb;

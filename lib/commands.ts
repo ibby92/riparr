@@ -2,12 +2,15 @@ import { all, getDb, run } from "./db";
 
 // Commands the UI sends to the worker through the `commands` table.
 export type Command =
-  | { type: "check_now"; containerId: number }
+  /** Check one source now. */
+  | { type: "check_now"; sourceId: number }
+  /** Check every polled source of a title now. */
+  | { type: "check_title"; titleId: number }
   /** Abort an in-flight download; the link's new status was already written by the UI. */
   | { type: "cancel_link"; linkId: number }
-  | { type: "cancel_container"; containerId: number }
-  /** Retry archives that failed or needed a password (e.g. after the password changed). */
-  | { type: "extract_container"; containerId: number };
+  | { type: "cancel_title"; titleId: number }
+  /** Retry archives that failed or needed a password (e.g. after a source password changed). */
+  | { type: "extract_title"; titleId: number };
 
 type CommandRow = { id: number; type: string; payload: string };
 

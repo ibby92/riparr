@@ -1,7 +1,5 @@
 import path from "node:path";
 import PQueue from "p-queue";
-import { getContainer, type Container } from "@/lib/containers";
-import { downloadsRoot } from "@/lib/db";
 import { downloadFile } from "@/lib/download";
 import { HostOfflineError, NeedsAttentionError, RateLimitError } from "@/lib/errors";
 import { logEvent } from "@/lib/events";
@@ -9,8 +7,8 @@ import { hostAccount } from "@/lib/host-accounts";
 import { findResolver } from "@/lib/hosts";
 import type { RemoteFile } from "@/lib/hosts/types";
 import {
-  containerFiles,
-  containersWithActiveLinks,
+  titleFiles,
+  titlesWithActiveLinks,
   downloadableLinks,
   failLinkFiles,
   getLink,
@@ -23,12 +21,16 @@ import {
   unresolvedLinks,
   updateFile,
   upsertFiles,
+  type FileRow,
   type Link,
 } from "@/lib/links";
 import { planMirrors } from "@/lib/mirrors";
 import { fetchFor } from "@/lib/net";
 import { notify } from "@/lib/notify";
-import { renderTemplate, resolveInside } from "@/lib/paths";
+import { parseEpisode } from "@/lib/episodes";
+import { resolveInside } from "@/lib/paths";
+import { getSource, titlePasswords } from "@/lib/sources";
+import { fileDestination, getTitle, type TitleWithStats } from "@/lib/titles";
 import { getSettings } from "@/lib/settings";
 import { diskIsLow } from "./disk";
 import { linkSettled } from "./extract-runner";
@@ -89,12 +91,13 @@ export function scheduleDownloads(shutdown: AbortSignal) {
     startJob(link, shutdown, (signal) => resolveQueue.add(() => resolveLink(link, signal)));
   }
 
-  for (const containerId of containersWithActiveLinks()) selectAndSettle(containerId);
+  for (const titleId of titlesWithActiveLinks()) selectAndSettle(titleId);
 
-  // Running downloads finish; nothing new starts until space is freed.
-  if (diskIsLow()) return;
   for (const link of downloadableLinks()) {
     if (jobs.has(link.id) || shutdown.aborted) continue;
+    // Running downloads finish; nothing new starts on a root folder that's low on space.
+    const root = getTitle(link.title_id)?.root_path;
+    if (!root || diskIsLow(root)) continue;
     const { globalQueue, hostQueue } = queues(link.host);
     // Host slot first, then a global slot, so one busy host can't starve the rest.
     startJob(link, shutdown, (signal) => hostQueue.add(() => globalQueue.add(() => downloadLink(link, signal))));
@@ -105,9 +108,9 @@ export function cancelLink(linkId: number) {
   jobs.get(linkId)?.controller.abort();
 }
 
-export function cancelContainer(containerId: number) {
+export function cancelTitle(titleId: number) {
   for (const job of jobs.values()) {
-    if (job.link.container_id === containerId) job.controller.abort();
+    if (job.link.title_id === titleId) job.controller.abort();
   }
 }
 
@@ -115,27 +118,28 @@ export function activeJobCount() {
   return jobs.size;
 }
 
-/** Mirror selection for one container, then finalizes links whose files are all accounted for. */
-export function selectAndSettle(containerId: number, now = Date.now()) {
+/** Mirror selection for one title (across all its sources), then finalizes links whose files are all accounted for. */
+export function selectAndSettle(titleId: number, now = Date.now()) {
   // Wait until every freshly found link is resolved, so a quick host doesn't win by default.
-  if (resolvingInProgress(containerId)) return;
+  if (resolvingInProgress(titleId)) return;
   const priority = getSettings().hostPriority;
-  const plan = planMirrors(containerFiles(containerId), priority, now);
+  const plan = planMirrors(titleFiles(titleId), priority, now);
   setFileStatuses(plan.promote, "queued");
   setFileStatuses(plan.standby, "standby");
-  settleLinks(containerId, new Set(plan.covered));
+  settleLinks(titleId, new Set(plan.covered));
 }
 
-function settleLinks(containerId: number, covered: Set<number>) {
+function settleLinks(titleId: number, covered: Set<number>) {
   const byLink = new Map<number, { status: string; files: { id: number; status: string; name: string }[] }>();
-  for (const f of containerFiles(containerId)) {
+  for (const f of titleFiles(titleId)) {
     if (f.linkStatus !== "queued" || f.linkResolvedAt === null || jobs.has(f.linkId)) continue;
     const entry = byLink.get(f.linkId) ?? { status: f.linkStatus, files: [] };
     entry.files.push({ id: f.fileId, status: f.fileStatus, name: f.name });
     byLink.set(f.linkId, entry);
   }
 
-  const container = getContainer(containerId);
+  const title = getTitle(titleId);
+  const subject = title && { id: title.id, name: title.name };
   for (const [linkId, { files }] of byLink) {
     const finished = files.every(
       (f) => f.status === "done" || f.status === "skipped" || (f.status === "standby" && covered.has(f.id)),
@@ -148,31 +152,32 @@ function settleLinks(containerId: number, covered: Set<number>) {
       setLinkStatus(linkId, "done", { attempts: 0 });
       const names = downloaded.length === 1 ? downloaded[0].name : `${downloaded.length} files`;
       const viaMirrors = downloaded.length < files.length ? ` (${files.length - downloaded.length} from other hosts)` : "";
-      logEvent("info", `Downloaded ${names} from ${link.host}${viaMirrors}`, containerId);
-      void notify({ event: "download_done", message: `Downloaded ${names}`, container });
+      logEvent("info", `Downloaded ${names} from ${link.host}${viaMirrors}`, titleId);
+      void notify({ event: "download_done", message: `Downloaded ${names}`, subject });
     } else {
       setLinkStatus(linkId, "mirror", { attempts: 0 });
-      logEvent("info", `Not needed: ${link.url} (its files came from preferred hosts)`, containerId);
+      logEvent("info", `Not needed: ${link.url} (its files came from preferred hosts)`, titleId);
     }
-    linkSettled(containerId);
+    linkSettled(titleId);
   }
 }
 
-/** Checks the link is still wanted, returning it with its container. */
+/** Checks the link is still wanted, returning it with its title. */
 function stillWanted(link: Link) {
   // The UI may have changed it (ignored, deleted) while it waited in the queue.
   const current = getLink(link.id);
-  const container = current && getContainer(current.container_id);
-  if (!current || !container || !container.enabled || !["new", "queued"].includes(current.status)) return null;
-  return { current, container };
+  const title = current && getTitle(current.title_id);
+  if (!current || !title || !title.monitored || !["new", "queued"].includes(current.status)) return null;
+  return { current, title };
 }
 
-async function resolveFiles(link: Link, container: Container, signal: AbortSignal) {
+async function resolveFiles(link: Link, title: TitleWithStats, signal: AbortSignal) {
   const resolver = findResolver(link.url);
   if (!resolver) throw new UnsupportedHostError(`No resolver for ${link.host}`);
   const remote = await resolver.resolve(new URL(link.url), {
     account: hostAccount(resolver.id),
-    password: container.password,
+    // Folder passwords: the source that listed the link first, then any of the title's.
+    password: (link.source_id ? getSource(link.source_id)?.password : null) ?? titlePasswords(title.id)[0] ?? null,
     signal,
     fetch: fetchFor("host"),
   });
@@ -186,6 +191,7 @@ async function resolveFiles(link: Link, container: Container, signal: AbortSigna
       size: f.size,
       hash: f.hash ? `${f.hash.algo}:${f.hash.value}` : null,
     })),
+    parseEpisode(link.episode ?? link.label),
   );
   return { remote, rows };
 }
@@ -197,7 +203,7 @@ async function resolveLink(link: Link, signal: AbortSignal) {
   if (!wanted) return;
   try {
     setLinkStatus(link.id, "resolving", { attempts: wanted.current.attempts });
-    await resolveFiles(link, wanted.container, signal);
+    await resolveFiles(link, wanted.title, signal);
     markResolved(link.id);
   } catch (err) {
     handleFailure(link, wanted.current.attempts, err, signal);
@@ -209,11 +215,11 @@ async function downloadLink(link: Link, signal: AbortSignal) {
   if (signal.aborted) return;
   const wanted = stillWanted(link);
   if (!wanted) return;
-  const { current, container } = wanted;
+  const { current, title } = wanted;
   try {
     setLinkStatus(link.id, "downloading", { attempts: current.attempts });
     // Re-resolve for fresh download handles (tokens, signed URLs).
-    const { remote } = await resolveFiles(link, container, signal);
+    const { remote } = await resolveFiles(link, title, signal);
     const byKey = new Map(remote.map((f) => [f.key, f]));
 
     for (const row of listFiles(link.id)) {
@@ -225,7 +231,7 @@ async function downloadLink(link: Link, signal: AbortSignal) {
         updateFile(row.id, { status: "failed", error: "No longer on the host" });
         continue;
       }
-      await downloadOne(container, link, row.id, file, signal);
+      await downloadOne(title, link, fresh, file, signal);
     }
     setLinkStatus(link.id, "queued", { attempts: 0 });
   } catch (err) {
@@ -233,17 +239,18 @@ async function downloadLink(link: Link, signal: AbortSignal) {
   }
 }
 
-async function downloadOne(container: Container, link: Link, fileId: number, file: RemoteFile, signal: AbortSignal) {
-  const root = downloadsRoot();
-  const relative = renderTemplate(container.path_template, {
-    container: container.name,
+async function downloadOne(title: TitleWithStats, link: Link, row: FileRow, file: RemoteFile, signal: AbortSignal) {
+  const fileId = row.id;
+  const finalPath = fileDestination(title, title.root_path, {
+    season: row.season,
+    episode: row.episode,
     host: link.host,
     filename: file.name,
     dir: file.dir,
     date: new Date(link.discovered_at),
   });
-  const finalPath = resolveInside(root, path.posix.join(container.target_dir, relative));
-  const partialPath = resolveInside(root, path.posix.join(PARTIAL_DIR, `${fileId}.part`));
+  // Partials live on the same root folder, so the final move is an atomic rename.
+  const partialPath = resolveInside(title.root_path, path.posix.join(PARTIAL_DIR, `${fileId}.part`));
 
   updateFile(fileId, { status: "downloading", error: null });
   let lastWrite = 0;
@@ -266,7 +273,7 @@ async function downloadOne(container: Container, link: Link, fileId: number, fil
     });
     updateFile(fileId, {
       status: result.status,
-      local_path: path.relative(root, result.path),
+      local_path: result.path,
       speed_bps: 0,
       bytes_done: file.size ?? ("bytes" in result ? result.bytes : 0),
     });
@@ -292,22 +299,22 @@ function handleFailure(link: Link, attempts: number, err: unknown, signal: Abort
   if (err instanceof HostOfflineError) {
     setLinkStatus(link.id, "offline", { error: message, attempts });
     failLinkFiles(link.id, message);
-    logEvent("warn", `Offline: ${link.url} (${message})`, link.container_id);
-    linkSettled(link.container_id);
+    logEvent("warn", `Offline: ${link.url} (${message})`, link.title_id);
+    linkSettled(link.title_id);
     return;
   }
   if (err instanceof RateLimitError) {
     // Throttling isn't the link's fault, so it doesn't count as an attempt. Other hosts may step in meanwhile.
     setLinkStatus(link.id, "queued", { error: message, attempts, retryAt: Date.now() + err.retryAfterMs });
     parkLinkFiles(link.id);
-    logEvent("info", `Rate limited by ${link.host}, retrying in ${Math.ceil(err.retryAfterMs / MINUTE)}m`, link.container_id);
+    logEvent("info", `Rate limited by ${link.host}, retrying in ${Math.ceil(err.retryAfterMs / MINUTE)}m`, link.title_id);
     return;
   }
 
   if (err instanceof UnsupportedHostError) {
-    // Containers often list hosts Riparr can't download from yet; set those aside quietly.
+    // Sources often list hosts Riparr can't download from yet; set those aside quietly.
     setLinkStatus(link.id, "ignored", { error: `Riparr can't download from ${link.host} yet`, attempts });
-    linkSettled(link.container_id);
+    linkSettled(link.title_id);
     return;
   }
 
@@ -315,14 +322,15 @@ function handleFailure(link: Link, attempts: number, err: unknown, signal: Abort
   if (err instanceof NeedsAttentionError || next >= MAX_ATTEMPTS) {
     setLinkStatus(link.id, "failed", { error: message, attempts: next });
     failLinkFiles(link.id, message);
-    logEvent("error", `Failed: ${link.url} (${message})`, link.container_id);
-    void notify({ event: "download_failed", message: `${link.url}: ${message}`, container: getContainer(link.container_id) });
-    linkSettled(link.container_id);
+    logEvent("error", `Failed: ${link.url} (${message})`, link.title_id);
+    const title = getTitle(link.title_id);
+    void notify({ event: "download_failed", message: `${link.url}: ${message}`, subject: title && { id: title.id, name: title.name } });
+    linkSettled(link.title_id);
     return;
   }
   setLinkStatus(link.id, "queued", { error: message, attempts: next, retryAt: Date.now() + retryDelay(next) });
   parkLinkFiles(link.id);
-  logEvent("warn", `Attempt ${next}/${MAX_ATTEMPTS} failed for ${link.url}: ${message}`, link.container_id);
+  logEvent("warn", `Attempt ${next}/${MAX_ATTEMPTS} failed for ${link.url}: ${message}`, link.title_id);
 }
 
 function errorMessage(err: unknown) {

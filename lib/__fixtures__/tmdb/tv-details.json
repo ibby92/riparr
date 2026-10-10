@@ -1,0 +1,60 @@
+{
+  "adult": false,
+  "backdrop_path": "/bd.jpg",
+  "created_by": [],
+  "episode_run_time": [],
+  "first_air_date": "2025-04-05",
+  "genres": [{ "id": 18, "name": "Drama" }],
+  "homepage": "",
+  "id": 240411,
+  "in_production": false,
+  "languages": ["ko"],
+  "last_air_date": "2025-05-11",
+  "name": "Doctor X: Age of the White Mafia",
+  "networks": [{ "id": 866, "name": "TVING", "logo_path": "/n.png", "origin_country": "KR" }],
+  "number_of_episodes": 16,
+  "number_of_seasons": 1,
+  "origin_country": ["KR"],
+  "original_language": "ko",
+  "original_name": "닥터 X: 하얀 마피아의 시대",
+  "overview": "A genius surgeon takes on the hospital's white mafia.",
+  "popularity": 12.3,
+  "poster_path": "/dxposter.jpg",
+  "status": "Ended",
+  "tagline": "",
+  "type": "Scripted",
+  "vote_average": 7.8,
+  "vote_count": 12,
+  "seasons": [
+    {
+      "air_date": "2025-04-05",
+      "episode_count": 16,
+      "id": 400001,
+      "name": "Season 1",
+      "overview": "",
+      "poster_path": "/s1.jpg",
+      "season_number": 1,
+      "vote_average": 0
+    },
+    {
+      "air_date": null,
+      "episode_count": 2,
+      "id": 400000,
+      "name": "Specials",
+      "overview": "",
+      "poster_path": null,
+      "season_number": 0,
+      "vote_average": 0
+    },
+    {
+      "air_date": "2026-11-01",
+      "episode_count": 12,
+      "id": 400002,
+      "name": "Season 2",
+      "overview": "",
+      "poster_path": null,
+      "season_number": 2,
+      "vote_average": 0
+    }
+  ]
+}

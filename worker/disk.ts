@@ -1,50 +1,65 @@
 import fs from "node:fs";
-import { downloadsRoot } from "@/lib/db";
 import { logEvent } from "@/lib/events";
 import { notify } from "@/lib/notify";
+import { listRootFolders } from "@/lib/root-folders";
 import { getSettings, writeDiskStatus } from "@/lib/settings";
 
 const CHECK_EVERY_MS = 30_000;
 const GB = 1024 ** 3;
 
-let lastCheck = -Infinity;
-let low = false;
+type RootState = { checkedAt: number; low: boolean; freeBytes: number | null; totalBytes: number | null };
+const roots = new Map<string, RootState>();
 
 /**
- * True while the downloads volume is below the configured free-space floor.
- * Re-checked at most every 30s; logs and notifies once per low-space episode.
+ * True while `rootPath` has less free space than the configured floor, so new
+ * downloads into it wait. Re-checked at most every 30 s per root; logs and
+ * notifies once per low-space episode. Also publishes every root folder's
+ * space for the dashboard.
  */
-export function diskIsLow(now = Date.now()): boolean {
-  if (now - lastCheck < CHECK_EVERY_MS) return low;
-  lastCheck = now;
+export function diskIsLow(rootPath: string, now = Date.now()): boolean {
+  const known = roots.get(rootPath);
+  if (known && now - known.checkedAt < CHECK_EVERY_MS) return known.low;
 
-  let stats;
+  let freeBytes: number | null = null;
+  let totalBytes: number | null = null;
   try {
-    const root = downloadsRoot();
-    fs.mkdirSync(root, { recursive: true });
-    stats = fs.statfsSync(root);
+    const stats = fs.statfsSync(rootPath);
+    freeBytes = stats.bavail * stats.bsize;
+    totalBytes = stats.blocks * stats.bsize;
   } catch (err) {
-    console.error("[riparr] free-space check failed", err);
-    return (low = false);
+    console.error(`[riparr] free-space check failed for ${rootPath}`, err);
   }
 
-  const freeBytes = stats.bavail * stats.bsize;
   const minFree = getSettings().minFreeGb * GB;
-  const nowLow = minFree > 0 && freeBytes < minFree;
-  writeDiskStatus({ freeBytes, totalBytes: stats.blocks * stats.bsize, low: nowLow, checkedAt: now });
-
-  if (nowLow && !low) {
-    const message = `Only ${(freeBytes / GB).toFixed(1)} GB free in the downloads folder; new downloads are paused`;
+  const low = freeBytes !== null && minFree > 0 && freeBytes < minFree;
+  if (low && !known?.low) {
+    const message = `Only ${(freeBytes! / GB).toFixed(1)} GB free in ${rootPath}; new downloads there are paused`;
     logEvent("warn", message);
     void notify({ event: "needs_attention", message });
-  } else if (!nowLow && low) {
-    logEvent("info", "Free space recovered; downloads resumed");
+  } else if (!low && known?.low) {
+    logEvent("info", `Free space recovered in ${rootPath}; downloads resumed`);
   }
-  return (low = nowLow);
+  roots.set(rootPath, { checkedAt: now, low, freeBytes, totalBytes });
+  publish(now);
+  return low;
 }
 
-/** Forces the next call to re-check (tests). */
+/** Checks every root folder (so the dashboard has numbers even when nothing is downloading). */
+export function checkAllRoots(now = Date.now()) {
+  for (const r of listRootFolders()) diskIsLow(r.path, now);
+}
+
+function publish(now: number) {
+  const list = [...roots.entries()].map(([path, r]) => ({
+    path,
+    freeBytes: r.freeBytes,
+    totalBytes: r.totalBytes,
+    low: r.low,
+  }));
+  writeDiskStatus({ roots: list, low: list.some((r) => r.low), checkedAt: now });
+}
+
+/** Forgets cached checks so the next call re-checks (tests). */
 export function resetDiskCheck() {
-  lastCheck = -Infinity;
-  low = false;
+  roots.clear();
 }

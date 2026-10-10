@@ -2,14 +2,15 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
-import { getContainer } from "@/lib/containers";
 import { recentEvents } from "@/lib/events";
 import { listExtractions, listLinks } from "@/lib/links";
-import { AddLinksForm, ImportDlcForm } from "../add-links-form";
+import { listSources } from "@/lib/sources";
+import { getTitle } from "@/lib/titles";
+import { AddLinksForm, AddSourceForm, ImportDlcForm } from "../add-links-form";
 import { AutoRefresh } from "../../auto-refresh";
 import { LinksTable } from "../../links-table";
 import { EventList, formatAgo, StatusBadge } from "../../ui";
-import { checkNow, retryExtractions, toggleContainer } from "../actions";
+import { checkSourceNow, checkTitleNow, removeSource, retryExtractions, toggleSource, toggleTitle } from "../actions";
 
 const ARCHIVE_STYLES = {
   extracted: "text-emerald-600 dark:text-emerald-400",
@@ -18,67 +19,105 @@ const ARCHIVE_STYLES = {
   failed: "text-red-500",
 } as const;
 
-export default function ContainerPage({ params }: PageProps<"/containers/[id]">) {
+export default function TitlePage({ params }: PageProps<"/titles/[id]">) {
   return (
     <Suspense fallback={<div className="card h-64 animate-pulse" />}>
-      <ContainerDetail params={params} />
+      <TitleDetail params={params} />
     </Suspense>
   );
 }
 
-async function ContainerDetail({ params }: { params: Promise<{ id: string }> }) {
+async function TitleDetail({ params }: { params: Promise<{ id: string }> }) {
   await connection();
-  const container = getContainer(Number((await params).id));
-  if (!container) notFound();
+  const title = getTitle(Number((await params).id));
+  if (!title) notFound();
 
   // Request-time render (after connection()): one clock reading per request is intended.
   // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
-  const links = listLinks(container.id);
-  const archives = listExtractions(container.id);
+  const links = listLinks(title.id);
+  const sources = listSources(title.id);
+  const archives = listExtractions(title.id);
   const busy = links.some((l) => l.status === "resolving" || l.status === "downloading");
   const rows: [string, React.ReactNode][] = [
-    ["URL", <a key="url" href={container.url} target="_blank" rel="noreferrer" className="break-all hover:text-accent">{container.url}</a>],
-    ["Saves to", <code key="dir">{`/downloads/${container.target_dir ? container.target_dir + "/" : ""}${container.path_template}`}</code>],
-    ["Poll interval", container.poll ? `${container.poll_interval_min} min` : "not polled (Click'n'Load only)"],
-    ["Last check", formatAgo(container.last_checked_at, now)],
-    ["Next check", !container.enabled ? "paused" : !container.poll ? "—" : container.next_check_at <= now ? "due" : formatAgo(container.next_check_at, now)],
-    ["Last new content", formatAgo(container.last_changed_at, now)],
-    ["Links", `${container.done_count} downloaded / ${container.link_count} found`],
+    ["Type", title.type === "show" ? "Show" : "Movie"],
+    ["Folder", <code key="dir">{`${title.root_path}/${title.folder}${title.type === "show" && title.season_folders ? "/Season NN" : ""}/${title.naming}`}</code>],
+    ...(title.type === "show"
+      ? [["Episodes", `${title.episodes_done} downloaded${title.total_episodes ? ` of ${title.total_episodes}` : ""} · ${title.episodes_seen} found`] as [string, string]]
+      : []),
+    ["Links", `${title.done_count} downloaded / ${title.link_count} found`],
+    ["Last new content", formatAgo(title.last_changed_at, now)],
   ];
 
   return (
     <div className="space-y-6">
       {busy && <AutoRefresh />}
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-2xl font-semibold">{container.name}</h1>
-        <StatusBadge status={container.status} enabled={container.enabled === 1} />
+        <h1 className="text-2xl font-semibold">
+          {title.name}
+          {title.year ? <span className="text-muted"> ({title.year})</span> : null}
+        </h1>
+        <StatusBadge status={title.status} />
         <div className="ml-auto flex gap-2">
-          <form action={checkNow}>
-            <input type="hidden" name="id" value={container.id} />
-            <button className="btn" disabled={!container.enabled || !container.poll}>Check now</button>
+          <form action={checkTitleNow}>
+            <input type="hidden" name="id" value={title.id} />
+            <button className="btn" disabled={!title.monitored || sources.length === 0}>Check now</button>
           </form>
-          <form action={toggleContainer}>
-            <input type="hidden" name="id" value={container.id} />
-            <input type="hidden" name="enabled" value={container.enabled ? "0" : "1"} />
-            <button className="btn">{container.enabled ? "Pause" : "Resume"}</button>
+          <form action={toggleTitle}>
+            <input type="hidden" name="id" value={title.id} />
+            <input type="hidden" name="monitored" value={title.monitored ? "0" : "1"} />
+            <button className="btn">{title.monitored ? "Pause" : "Resume"}</button>
           </form>
-          <Link href={`/containers/${container.id}/edit`} className="btn">Edit</Link>
+          <Link href={`/titles/${title.id}/edit`} className="btn">Edit</Link>
         </div>
       </div>
-
-      {container.last_error && (
-        <div className="card border-red-500/40 p-4 text-sm text-red-500">{container.last_error}</div>
-      )}
 
       <dl className="card grid gap-x-6 gap-y-2 p-4 text-sm sm:grid-cols-[max-content_1fr]">
         {rows.map(([label, value]) => (
           <div key={label} className="contents">
             <dt className="text-muted">{label}</dt>
-            <dd>{value}</dd>
+            <dd className="min-w-0 break-words">{value}</dd>
           </div>
         ))}
       </dl>
+
+      <section className="card">
+        <h2 className="border-b border-border px-4 py-2 font-medium">Sources</h2>
+        {sources.length === 0 ? (
+          <p className="p-4 text-sm text-muted">No sources yet. Add the page(s) that list this title&apos;s links.</p>
+        ) : (
+          <ul className="divide-y divide-border text-sm">
+            {sources.map((s) => (
+              <li key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
+                <a href={s.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate hover:text-accent" title={s.url}>
+                  {s.url}
+                </a>
+                <StatusBadge status={s.enabled ? s.status : "paused"} />
+                <span className="text-xs text-muted">
+                  {s.poll ? `every ${s.poll_interval_min} min · checked ${formatAgo(s.last_checked_at, now)}` : "Click'n'Load only"} · {s.link_count} links
+                </span>
+                <div className="flex gap-2">
+                  <form action={checkSourceNow}>
+                    <input type="hidden" name="id" value={s.id} />
+                    <button className="btn" disabled={!s.enabled || !s.poll || !title.monitored}>Check</button>
+                  </form>
+                  <form action={toggleSource}>
+                    <input type="hidden" name="id" value={s.id} />
+                    <input type="hidden" name="enabled" value={s.enabled ? "0" : "1"} />
+                    <button className="btn">{s.enabled ? "Disable" : "Enable"}</button>
+                  </form>
+                  <form action={removeSource}>
+                    <input type="hidden" name="id" value={s.id} />
+                    <button className="btn btn-danger">Remove</button>
+                  </form>
+                </div>
+                {s.last_error && <p className="w-full text-xs text-red-500">{s.last_error}</p>}
+              </li>
+            ))}
+          </ul>
+        )}
+        <AddSourceForm titleId={title.id} />
+      </section>
 
       <section className="card">
         <h2 className="border-b border-border px-4 py-2 font-medium">Links</h2>
@@ -87,8 +126,8 @@ async function ContainerDetail({ params }: { params: Promise<{ id: string }> }) 
 
       <details className="card">
         <summary className="cursor-pointer px-4 py-2 font-medium">Add links by hand or import a .dlc</summary>
-        <AddLinksForm containerId={container.id} />
-        <ImportDlcForm containerId={container.id} />
+        <AddLinksForm titleId={title.id} />
+        <ImportDlcForm titleId={title.id} />
       </details>
 
       {archives.length > 0 && (
@@ -97,7 +136,7 @@ async function ContainerDetail({ params }: { params: Promise<{ id: string }> }) 
             <h2 className="font-medium">Archives</h2>
             {archives.some((a) => a.status === "failed" || a.status === "wrong_password") && (
               <form action={retryExtractions}>
-                <input type="hidden" name="id" value={container.id} />
+                <input type="hidden" name="id" value={title.id} />
                 <button className="btn">Retry failed</button>
               </form>
             )}
@@ -120,7 +159,7 @@ async function ContainerDetail({ params }: { params: Promise<{ id: string }> }) 
 
       <section className="card">
         <h2 className="border-b border-border px-4 py-2 font-medium">Activity</h2>
-        <EventList events={recentEvents(50, container.id)} now={now} showContainer={false} />
+        <EventList events={recentEvents(50, title.id)} now={now} showTitle={false} />
       </section>
     </div>
   );

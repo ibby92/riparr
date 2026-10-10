@@ -2,7 +2,15 @@ import type { DatabaseSync } from "node:sqlite";
 
 // Append-only: each entry is applied once, tracked via PRAGMA user_version.
 // Timestamps are Unix epoch milliseconds.
-export const MIGRATIONS: string[] = [
+export type MigrationContext = {
+  /** Absolute path that pre-v8 containers' target directories were relative to. */
+  downloadsRoot: string;
+};
+
+/** SQL, or a function for migrations that need runtime values. */
+export type Migration = string | ((db: DatabaseSync, ctx: MigrationContext) => void);
+
+export const MIGRATIONS: Migration[] = [
   `
   CREATE TABLE containers (
     id                INTEGER PRIMARY KEY,
@@ -179,9 +187,171 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE links ADD COLUMN quality TEXT;
   ALTER TABLE links ADD COLUMN size_text TEXT;
   `,
+  // v1 schema: titles (shows/movies) in root folders, fed by one or more sources.
+  // Each container becomes a title + source with the same id, keeping links, files and history.
+  (db, ctx) => {
+    db.exec(`
+      CREATE TABLE root_folders (
+        id         INTEGER PRIMARY KEY,
+        path       TEXT    NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE titles (
+        id             INTEGER PRIMARY KEY,
+        type           TEXT    NOT NULL CHECK (type IN ('show', 'movie')),
+        name           TEXT    NOT NULL,
+        year           INTEGER,
+        tmdb_id        INTEGER,
+        overview       TEXT,
+        poster_path    TEXT,
+        -- Expected episode count (from TMDB, excluding specials); null if unknown.
+        total_episodes INTEGER,
+        root_folder_id INTEGER NOT NULL REFERENCES root_folders(id),
+        -- Relative to the root folder; may contain "/".
+        folder         TEXT    NOT NULL,
+        season_folders INTEGER NOT NULL DEFAULT 1,
+        -- File name template inside the title (and season) folder.
+        naming         TEXT    NOT NULL DEFAULT '{filename}',
+        -- 0 pauses the title: no polling, no new downloads.
+        monitored      INTEGER NOT NULL DEFAULT 1,
+        created_at     INTEGER NOT NULL,
+        updated_at     INTEGER NOT NULL
+      );
+      CREATE UNIQUE INDEX titles_tmdb ON titles(type, tmdb_id) WHERE tmdb_id IS NOT NULL;
+
+      CREATE TABLE sources (
+        id                INTEGER PRIMARY KEY,
+        title_id          INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
+        url               TEXT    NOT NULL UNIQUE,
+        -- Container page / archive password.
+        password          TEXT,
+        poll_interval_min INTEGER NOT NULL DEFAULT 60,
+        -- 0 stops checking this source (the title's other sources carry on).
+        enabled           INTEGER NOT NULL DEFAULT 1,
+        -- 0 = never fetch the page; links arrive only via Click'n'Load or by hand.
+        poll              INTEGER NOT NULL DEFAULT 1,
+        status            TEXT    NOT NULL DEFAULT 'pending'
+                          CHECK (status IN ('pending', 'ok', 'needs_attention', 'error')),
+        last_error        TEXT,
+        last_checked_at   INTEGER,
+        last_changed_at   INTEGER,
+        next_check_at     INTEGER NOT NULL DEFAULT 0,
+        created_at        INTEGER NOT NULL
+      );
+      CREATE INDEX sources_title ON sources(title_id);
+    `);
+
+    const containers = db.prepare("SELECT * FROM containers ORDER BY id").all() as Record<string, unknown>[];
+    if (containers.length) {
+      const now = Date.now();
+      db.prepare("INSERT INTO root_folders (id, path, created_at) VALUES (1, ?, ?)").run(ctx.downloadsRoot, now);
+      const title = db.prepare(
+        `INSERT INTO titles (id, type, name, root_folder_id, folder, season_folders, naming, monitored, created_at, updated_at)
+         VALUES (?, 'show', ?, 1, ?, 0, ?, ?, ?, ?)`,
+      );
+      const source = db.prepare(
+        `INSERT INTO sources (id, title_id, url, password, poll_interval_min, enabled, poll, status, last_error,
+                              last_checked_at, last_changed_at, next_check_at, created_at)
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const c of containers) {
+        // Old layout was <downloads>/<target_dir>/<template>; keep it exactly (no season folders).
+        const folder = String(c.target_dir ?? "") || String(c.name);
+        const naming = String(c.path_template).replaceAll("{container}", "{title}");
+        title.run(c.id as number, c.name as string, folder, naming, c.enabled as number, c.created_at as number, now);
+        source.run(
+          c.id as number, c.id as number, c.url as string, (c.password as string | null) ?? null,
+          c.poll_interval_min as number, c.poll as number, c.status as string, (c.last_error as string | null) ?? null,
+          (c.last_checked_at as number | null) ?? null, (c.last_changed_at as number | null) ?? null,
+          c.next_check_at as number, c.created_at as number,
+        );
+      }
+    }
+
+    db.exec(`
+      CREATE TABLE links_new (
+        id               INTEGER PRIMARY KEY,
+        title_id         INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
+        -- The source that first listed this link (kept if the source is removed).
+        source_id        INTEGER REFERENCES sources(id) ON DELETE SET NULL,
+        url              TEXT    NOT NULL,
+        fingerprint      TEXT    NOT NULL,
+        host             TEXT    NOT NULL,
+        status           TEXT    NOT NULL DEFAULT 'new'
+                         CHECK (status IN ('new', 'queued', 'resolving', 'downloading', 'done', 'failed', 'ignored', 'offline', 'mirror')),
+        error            TEXT,
+        discovered_at    INTEGER NOT NULL,
+        attempts         INTEGER NOT NULL DEFAULT 0,
+        retry_at         INTEGER,
+        updated_at       INTEGER,
+        archive_password TEXT,
+        resolved_at      INTEGER,
+        label            TEXT,
+        episode          TEXT,
+        quality          TEXT,
+        size_text        TEXT,
+        -- Links are unique per title, so two sites listing the same host link don't duplicate it.
+        UNIQUE (title_id, fingerprint)
+      );
+      INSERT INTO links_new
+        SELECT id, container_id, container_id, url, fingerprint, host, status, error, discovered_at, attempts,
+               retry_at, updated_at, archive_password, resolved_at, label, episode, quality, size_text
+          FROM links;
+      DROP TABLE links;
+      ALTER TABLE links_new RENAME TO links;
+      CREATE INDEX links_status ON links(status);
+      CREATE INDEX links_source ON links(source_id);
+
+      ALTER TABLE files ADD COLUMN season INTEGER;
+      ALTER TABLE files ADD COLUMN episode INTEGER;
+
+      CREATE TABLE extractions_new (
+        id         INTEGER PRIMARY KEY,
+        title_id   INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
+        -- Entry volume as an absolute path.
+        entry_path TEXT    NOT NULL UNIQUE,
+        status     TEXT    NOT NULL CHECK (status IN ('extracted', 'incomplete', 'wrong_password', 'failed')),
+        error      TEXT,
+        files      INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      );
+      INSERT INTO extractions_new (id, title_id, entry_path, status, error, files, updated_at)
+        SELECT id, container_id, ?1 || '/' || entry_path, status, error, files, updated_at FROM extractions;
+      DROP TABLE extractions;
+      ALTER TABLE extractions_new RENAME TO extractions;
+
+      CREATE TABLE events_new (
+        id       INTEGER PRIMARY KEY,
+        at       INTEGER NOT NULL,
+        level    TEXT    NOT NULL CHECK (level IN ('info', 'warn', 'error')),
+        title_id INTEGER REFERENCES titles(id) ON DELETE CASCADE,
+        message  TEXT    NOT NULL
+      );
+      INSERT INTO events_new SELECT id, at, level, container_id, message FROM events;
+      DROP TABLE events;
+      ALTER TABLE events_new RENAME TO events;
+      CREATE INDEX events_at ON events(at);
+
+      DROP TABLE containers;
+    `.replace("?1", `'${ctx.downloadsRoot.replaceAll("'", "''")}'`));
+  },
 ];
 
-export function migrate(db: DatabaseSync) {
+/** Latest schema version (number of migrations). */
+export const SCHEMA_VERSION = MIGRATIONS.length;
+
+/**
+ * Brings the database up to date. `beforeUpgrade` runs before any migration on an
+ * existing database (version > 0), e.g. to take a backup; a failure there aborts.
+ */
+export function migrate(
+  db: DatabaseSync,
+  ctx: MigrationContext = { downloadsRoot: "/downloads" },
+  beforeUpgrade?: (fromVersion: number) => void,
+) {
+  const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+  if (current > 0 && current < MIGRATIONS.length) beforeUpgrade?.(current);
   // Table rebuilds need foreign keys off, and that pragma is ignored inside a transaction.
   db.exec("PRAGMA foreign_keys = OFF");
   // IMMEDIATE takes the write lock up front so the web server and the worker
@@ -190,7 +360,9 @@ export function migrate(db: DatabaseSync) {
   try {
     const { user_version } = db.prepare("PRAGMA user_version").get() as { user_version: number };
     for (let v = user_version; v < MIGRATIONS.length; v++) {
-      db.exec(MIGRATIONS[v]);
+      const step = MIGRATIONS[v];
+      if (typeof step === "string") db.exec(step);
+      else step(db, ctx);
     }
     const broken = db.prepare("PRAGMA foreign_key_check").all();
     if (broken.length) throw new Error(`Migration left ${broken.length} dangling foreign key(s)`);

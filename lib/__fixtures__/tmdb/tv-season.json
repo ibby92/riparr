@@ -1,0 +1,15 @@
+{
+  "_id": "abc",
+  "air_date": "2025-04-05",
+  "episodes": [
+    { "air_date": "2025-04-05", "episode_number": 1, "episode_type": "standard", "id": 1, "name": "Episode 1", "overview": "", "production_code": "", "runtime": 70, "season_number": 1, "show_id": 240411, "still_path": null, "vote_average": 0, "vote_count": 0, "crew": [], "guest_stars": [] },
+    { "air_date": "2025-04-06", "episode_number": 2, "episode_type": "standard", "id": 2, "name": "The White Mafia", "overview": "", "production_code": "", "runtime": 70, "season_number": 1, "show_id": 240411, "still_path": null, "vote_average": 0, "vote_count": 0, "crew": [], "guest_stars": [] },
+    { "air_date": null, "episode_number": 3, "episode_type": "standard", "id": 3, "name": "", "overview": "", "production_code": "", "runtime": null, "season_number": 1, "show_id": 240411, "still_path": null, "vote_average": 0, "vote_count": 0, "crew": [], "guest_stars": [] }
+  ],
+  "name": "Season 1",
+  "overview": "",
+  "id": 400001,
+  "poster_path": "/s1.jpg",
+  "season_number": 1,
+  "vote_average": 0
+}

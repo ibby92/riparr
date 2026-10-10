@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { LinkStatus, LinkWithProgress } from "@/lib/links";
-import { ignoreLink, retryLink } from "./containers/actions";
+import { ignoreLink, retryLink } from "./titles/actions";
 import { formatAgo } from "./ui";
 
 export function formatBytes(n: number | null): string {
@@ -48,12 +48,12 @@ const IGNORABLE: LinkStatus[] = ["new", "queued", "resolving", "downloading", "f
 export function LinksTable({
   links,
   now,
-  showContainer = false,
+  showTitle = false,
   empty = "No links yet.",
 }: {
   links: LinkWithProgress[];
   now: number;
-  showContainer?: boolean;
+  showTitle?: boolean;
   empty?: string;
 }) {
   if (links.length === 0) return <p className="p-4 text-sm text-muted">{empty}</p>;
@@ -63,7 +63,7 @@ export function LinksTable({
         <thead className="border-b border-border text-left text-xs uppercase tracking-wide text-muted">
           <tr>
             <th className="px-4 py-2 font-medium">Link</th>
-            {showContainer && <th className="px-4 py-2 font-medium">Container</th>}
+            {showTitle && <th className="px-4 py-2 font-medium">Title</th>}
             <th className="px-4 py-2 font-medium">Status</th>
             <th className="w-48 px-4 py-2 font-medium">Progress</th>
             <th className="px-4 py-2" />
@@ -92,10 +92,10 @@ export function LinksTable({
                     <div className={`mt-1 text-xs ${l.status === "ignored" ? "text-muted" : "text-red-500"}`}>{l.error}</div>
                   )}
                 </td>
-                {showContainer && (
+                {showTitle && (
                   <td className="px-4 py-2">
-                    <Link href={`/containers/${l.container_id}`} className="hover:text-accent">
-                      {l.container_name}
+                    <Link href={`/titles/${l.title_id}`} className="hover:text-accent">
+                      {l.title_name}
                     </Link>
                   </td>
                 )}

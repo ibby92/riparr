@@ -4,7 +4,7 @@ import { useActionState } from "react";
 import { HostPriority } from "./host-priority";
 import { NOTIFY_EVENTS } from "@/lib/notify-events";
 import type { AppSettings } from "@/lib/settings";
-import { checkFlareSolverr, checkProxy, saveAppSettings, sendTestNotification, type SettingsState, type TestState } from "./actions";
+import { addRootFolderAction, checkFlareSolverr, checkProxy, checkTmdb, saveAppSettings, sendTestNotification, type RootFolderState, type SettingsState, type TestState } from "./actions";
 
 function Field({ label, hint, errors, children }: { label: string; hint?: string; errors?: string[]; children: React.ReactNode }) {
   return (
@@ -21,7 +21,17 @@ function Field({ label, hint, errors, children }: { label: string; hint?: string
   );
 }
 
-export function SettingsForm({ settings, envProxy }: { settings: AppSettings; envProxy: boolean }) {
+export function SettingsForm({
+  settings,
+  envProxy,
+  roots,
+  tmdbKeySet,
+}: {
+  settings: AppSettings;
+  envProxy: boolean;
+  roots: { id: number; path: string }[];
+  tmdbKeySet: boolean;
+}) {
   const [state, action, pending] = useActionState<SettingsState, FormData>(saveAppSettings, {});
   const errors = state.errors ?? {};
   const mb = settings.bytesPerSecond / 1024 / 1024;
@@ -59,24 +69,62 @@ export function SettingsForm({ settings, envProxy }: { settings: AppSettings; en
         </label>
       </fieldset>
 
+      <fieldset id="media" className="space-y-4">
+        <legend className="mb-2 font-medium">Media Management</legend>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {(["defaultShowRootId", "defaultMovieRootId"] as const).map((key) => (
+            <Field key={key} label={key === "defaultShowRootId" ? "Root folder for new shows" : "Root folder for new movies"}>
+              <select name={key} className="input" defaultValue={settings[key] ?? ""}>
+                <option value="">{roots.length ? "First root folder" : "Add a root folder below"}</option>
+                {roots.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.path}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          ))}
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="defaultSeasonFolders" defaultChecked={settings.defaultSeasonFolders} />
+          New shows use season folders (<code>Season 01/</code>)
+        </label>
+      </fieldset>
+
+      <fieldset className="space-y-4">
+        <legend className="mb-2 font-medium">Metadata (TMDB)</legend>
+        <div className="grid gap-4 sm:grid-cols-[1fr_10rem]">
+          <Field
+            label="TMDB API key"
+            hint="Free from themoviedb.org → Settings → API. Used for search, posters and episode counts."
+            errors={errors.tmdbApiKey}
+          >
+            <input
+              name="tmdbApiKey"
+              type="password"
+              className="input font-mono"
+              autoComplete="off"
+              placeholder={tmdbKeySet ? "•••••••• (saved, leave empty to keep)" : ""}
+            />
+          </Field>
+          <Field label="Language" errors={errors.tmdbLanguage}>
+            <input name="tmdbLanguage" className="input" defaultValue={settings.tmdbLanguage} />
+          </Field>
+        </div>
+        {tmdbKeySet && (
+          <label className="flex items-center gap-2 text-xs text-muted">
+            <input type="checkbox" name="clearTmdbApiKey" /> Remove the saved key
+          </label>
+        )}
+      </fieldset>
+
       <fieldset className="space-y-4">
         <legend className="mb-2 font-medium">Click&apos;n&apos;Load</legend>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" name="cnlEnabled" defaultChecked={settings.cnlEnabled} />
-          Listen on port 9666 (restart Riparr to apply)
+          Listen on port 9666 (restart Riparr to apply). Links from pages you don&apos;t track yet become a new show in the
+          default show root folder.
         </label>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field
-            label="Folder for links from unknown pages"
-            hint="Links from a page you already watch use that container's folder"
-            errors={errors.cnlTargetDir}
-          >
-            <input name="cnlTargetDir" className="input" defaultValue={settings.cnlTargetDir} />
-          </Field>
-          <Field label="Naming template" errors={errors.cnlTemplate}>
-            <input name="cnlTemplate" className="input font-mono" defaultValue={settings.cnlTemplate} />
-          </Field>
-        </div>
       </fieldset>
 
       <fieldset className="space-y-4">
@@ -156,7 +204,22 @@ export function IntegrationTests() {
       <TestButton label="Send test notification" run={sendTestNotification} />
       <TestButton label="Test FlareSolverr" run={checkFlareSolverr} />
       <TestButton label="Test proxy" run={checkProxy} />
+      <TestButton label="Test TMDB" run={checkTmdb} />
       <span className="text-xs text-muted">Tests use saved settings.</span>
     </div>
+  );
+}
+
+export function AddRootFolderForm() {
+  const [state, action, pending] = useActionState<RootFolderState, FormData>(addRootFolderAction, {});
+  return (
+    <form action={action} className="flex flex-wrap items-start gap-2">
+      <input name="path" className="input max-w-md flex-1 font-mono" placeholder="/media/Kdrama" required aria-label="Folder path" />
+      <button className="btn" disabled={pending}>
+        {pending ? "Adding…" : "Add root folder"}
+      </button>
+      {state.error && <p className="w-full text-sm text-red-500">{state.error}</p>}
+      {state.message && <p className="w-full text-sm text-emerald-500">{state.message}</p>}
+    </form>
   );
 }
