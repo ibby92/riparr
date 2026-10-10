@@ -1,0 +1,213 @@
+/*
+ * Riparr design tokens
+ * --------------------
+ * Layout concept: grey canvas, white cards with soft 1px borders, a quiet sidebar,
+ * serif display headings over a plain UI sans. State lives in pills and chips.
+ *
+ * Neutrals carry a slight cool teal-slate bias toward the accent (hue ~200).
+ * One accent (riptide teal). Semantic good / warn / critical are separate from it.
+ * Host colours (gofile, pixeldrain, MEGA) are a validated categorical set:
+ * use them for chart series, host chips and dots, always next to the host name.
+ *
+ * Light values on :root. Dark values are repeated in two blocks:
+ *   - system dark, unless the user forced light;
+ *   - an explicit data-theme="dark" override.
+ * Keep both dark blocks identical.
+ *
+ * Fonts (Google Fonts):
+ *   https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap
+ */
+
+:root {
+  /* ---- Surfaces & ink ---- */
+  --bg: #edf0f1;              /* app canvas */
+  --surface: #ffffff;         /* cards, sidebar, inputs */
+  --surface-2: #f5f7f8;       /* subtle fills: table headers, wells, hover */
+  --surface-3: #e8ecee;       /* pressed / track backgrounds */
+  --overlay: rgb(16 24 28 / 0.42); /* scrim behind drawers and modals */
+  --border: #e0e5e7;
+  --border-strong: #cdd5d8;
+  --fg: #151b1e;              /* primary text */
+  --fg-2: #39454a;            /* secondary text */
+  --muted: #63727a;           /* labels, metadata (AA on surface and bg) */
+  --faint: #98a4aa;           /* placeholders, disabled, chart grid labels */
+  --grid: #e7ebed;            /* chart gridlines */
+
+  /* ---- Accent (riptide teal) ---- */
+  --accent: #0f7c86;
+  --accent-hover: #0b6870;
+  --accent-fg: #ffffff;       /* text on accent */
+  --accent-soft: #e2f2f3;     /* tinted backgrounds: active nav, selected */
+  --accent-ink: #0b616a;      /* accent-coloured text on light surfaces */
+  --focus: #0f7c86;
+
+  /* Primary button is ink, like the reference */
+  --primary: #151b1e;
+  --primary-hover: #2a3439;
+  --primary-fg: #ffffff;
+
+  /* ---- Semantic ---- */
+  --good: #1d7f4e;
+  --good-soft: #e3f3ea;
+  --warn: #a2640a;
+  --warn-soft: #fbf0db;
+  --critical: #c4352b;
+  --critical-soft: #fbe8e6;
+  --info: var(--accent);
+  --info-soft: var(--accent-soft);
+  --paused: #63727a;
+  --paused-soft: #edf0f1;
+
+  /* ---- Hosts (validated categorical: CVD dE >= 16 adjacent, light) ---- */
+  --host-gofile: #2f6fdb;
+  --host-pixeldrain: #e07b1f;
+  --host-mega: #c42d5c;
+  --host-other: #7b8a91;
+
+  /* ---- Poster placeholders (generated tiles until TMDB art loads) ---- */
+  --poster-sat: 42%;
+  --poster-l1: 46%;
+  --poster-l2: 22%;
+  --on-poster: #ffffff;
+
+  /* ---- Type ---- */
+  --font-display: "Newsreader", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --text-xs: 0.75rem;    /* 12  captions, chart labels */
+  --text-sm: 0.8125rem;  /* 13  table cells, metadata */
+  --text-base: 0.875rem; /* 14  UI body */
+  --text-md: 1rem;       /* 16  card titles (sans), inputs on phones */
+  --text-lg: 1.25rem;    /* 20  card titles (display) */
+  --text-xl: 1.5rem;     /* 24  page titles on phones */
+  --text-2xl: 1.875rem;  /* 30  page titles, stat values */
+  --text-3xl: 2.25rem;   /* 36  hero numbers */
+  --leading-tight: 1.2;
+  --leading-normal: 1.5;
+  --tracking-label: 0.06em; /* uppercase labels such as MENU */
+
+  /* ---- Spacing (4px base) ---- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --gutter: 1rem;          /* page side gutter on phones */
+  --gutter-lg: 1.75rem;    /* page side gutter on desktop */
+  --sidebar-w: 16.5rem;
+  --sidebar-w-collapsed: 4.25rem;
+
+  /* ---- Radius ---- */
+  --radius-xs: 4px;   /* chips, progress bars */
+  --radius-sm: 8px;   /* inputs, buttons */
+  --radius-md: 12px;  /* cards */
+  --radius-lg: 16px;  /* modals, sheets, app frame */
+  --radius-pill: 999px;
+
+  /* ---- Elevation ---- */
+  --shadow-xs: 0 1px 2px rgb(16 24 28 / 0.05);
+  --shadow-sm: 0 1px 2px rgb(16 24 28 / 0.05), 0 2px 6px rgb(16 24 28 / 0.04);
+  --shadow-md: 0 4px 12px rgb(16 24 28 / 0.08), 0 1px 3px rgb(16 24 28 / 0.06);
+  --shadow-lg: 0 16px 40px rgb(16 24 28 / 0.16), 0 2px 8px rgb(16 24 28 / 0.08);
+
+  /* ---- Motion ---- */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1315;
+    --surface: #161c1f;
+    --surface-2: #1b2326;
+    --surface-3: #232d31;
+    --overlay: rgb(0 0 0 / 0.6);
+    --border: #253034;
+    --border-strong: #34424a;
+    --fg: #e8eef0;
+    --fg-2: #c2ccd0;
+    --muted: #8d9ba1;
+    --faint: #5f6d74;
+    --grid: #222c30;
+    --accent: #3fb3ba;
+    --accent-hover: #5cc4ca;
+    --accent-fg: #062a2d;
+    --accent-soft: #14302f;
+    --accent-ink: #6cccd1;
+    --focus: #5cc4ca;
+    --primary: #e8eef0;
+    --primary-hover: #ffffff;
+    --primary-fg: #101518;
+    --good: #4cc488;
+    --good-soft: #12291e;
+    --warn: #e2a647;
+    --warn-soft: #2c2312;
+    --critical: #f0776c;
+    --critical-soft: #33191a;
+    --paused: #8d9ba1;
+    --paused-soft: #1f282b;
+    --host-gofile: #5487e0;
+    --host-pixeldrain: #c07a22;
+    --host-mega: #db5279;
+    --host-other: #74838a;
+    --poster-sat: 34%;
+    --poster-l1: 36%;
+    --poster-l2: 15%;
+    --on-poster: #f3f6f7;
+    --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3), 0 2px 6px rgb(0 0 0 / 0.2);
+    --shadow-md: 0 4px 14px rgb(0 0 0 / 0.4), 0 1px 3px rgb(0 0 0 / 0.3);
+    --shadow-lg: 0 18px 44px rgb(0 0 0 / 0.55), 0 2px 8px rgb(0 0 0 / 0.4);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0e1315;
+  --surface: #161c1f;
+  --surface-2: #1b2326;
+  --surface-3: #232d31;
+  --overlay: rgb(0 0 0 / 0.6);
+  --border: #253034;
+  --border-strong: #34424a;
+  --fg: #e8eef0;
+  --fg-2: #c2ccd0;
+  --muted: #8d9ba1;
+  --faint: #5f6d74;
+  --grid: #222c30;
+  --accent: #3fb3ba;
+  --accent-hover: #5cc4ca;
+  --accent-fg: #062a2d;
+  --accent-soft: #14302f;
+  --accent-ink: #6cccd1;
+  --focus: #5cc4ca;
+  --primary: #e8eef0;
+  --primary-hover: #ffffff;
+  --primary-fg: #101518;
+  --good: #4cc488;
+  --good-soft: #12291e;
+  --warn: #e2a647;
+  --warn-soft: #2c2312;
+  --critical: #f0776c;
+  --critical-soft: #33191a;
+  --paused: #8d9ba1;
+  --paused-soft: #1f282b;
+  --host-gofile: #5487e0;
+  --host-pixeldrain: #c07a22;
+  --host-mega: #db5279;
+  --host-other: #74838a;
+  --poster-sat: 34%;
+  --poster-l1: 36%;
+  --poster-l2: 15%;
+  --on-poster: #f3f6f7;
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3), 0 2px 6px rgb(0 0 0 / 0.2);
+  --shadow-md: 0 4px 14px rgb(0 0 0 / 0.4), 0 1px 3px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 18px 44px rgb(0 0 0 / 0.55), 0 2px 8px rgb(0 0 0 / 0.4);
+  color-scheme: dark;
+}

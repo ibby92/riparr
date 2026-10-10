@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Riparr">
+  <title>Riparr</title>
+  <defs>
+    <linearGradient id="rp-tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#169ca5"/>
+      <stop offset="1" stop-color="#0a5862"/>
+    </linearGradient>
+    <clipPath id="rp-left"><polygon points="0,0 31.8,0 31.8,14 29.2,19.5 33.4,25 29,30.5 33.4,36 29.2,41.5 31.8,47 31.8,64 0,64"/></clipPath>
+    <clipPath id="rp-right"><polygon points="34.6,0 64,0 64,64 34.6,64 34.6,47 32,41.5 36.2,36 31.8,30.5 36.2,25 32,19.5 34.6,14"/></clipPath>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#rp-tile)"/>
+  <g fill="#ffffff" fill-rule="evenodd" transform="translate(-1.6 -2.6)">
+    <path clip-path="url(#rp-left)" d="M17 18h30a6 6 0 0 1 6 6v18a6 6 0 0 1-6 6H17a6 6 0 0 1-6-6V24a6 6 0 0 1 6-6ZM19 26v12h26V26ZM15.5 20.5h3v2.5h-3ZM15.5 43h3v2.5h-3ZM21.5 20.5h3v2.5h-3ZM21.5 43h3v2.5h-3ZM27.5 20.5h3v2.5h-3ZM27.5 43h3v2.5h-3ZM33.5 20.5h3v2.5h-3ZM33.5 43h3v2.5h-3ZM39.5 20.5h3v2.5h-3ZM39.5 43h3v2.5h-3ZM45.5 20.5h3v2.5h-3ZM45.5 43h3v2.5h-3Z"/>
+    <g transform="translate(2.6 5.2) rotate(6 34 18)"><path clip-path="url(#rp-right)" d="M17 18h30a6 6 0 0 1 6 6v18a6 6 0 0 1-6 6H17a6 6 0 0 1-6-6V24a6 6 0 0 1 6-6ZM19 26v12h26V26ZM15.5 20.5h3v2.5h-3ZM15.5 43h3v2.5h-3ZM21.5 20.5h3v2.5h-3ZM21.5 43h3v2.5h-3ZM27.5 20.5h3v2.5h-3ZM27.5 43h3v2.5h-3ZM33.5 20.5h3v2.5h-3ZM33.5 43h3v2.5h-3ZM39.5 20.5h3v2.5h-3ZM39.5 43h3v2.5h-3ZM45.5 20.5h3v2.5h-3ZM45.5 43h3v2.5h-3Z"/></g>
+  </g>
+</svg>
