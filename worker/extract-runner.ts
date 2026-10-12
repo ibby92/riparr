@@ -4,7 +4,7 @@ import PQueue from "p-queue";
 import { all, one, run } from "@/lib/db";
 import { titlePasswords } from "@/lib/sources";
 import { getTitle } from "@/lib/titles";
-import { logEvent } from "@/lib/events";
+import { logDebug, logEvent } from "@/lib/events";
 import { pendingLinkCount } from "@/lib/links";
 import { notify } from "@/lib/notify";
 import { getSettings } from "@/lib/settings";
@@ -37,7 +37,7 @@ function scheduleExtraction(titleId: number, dirs: string[]) {
     void queue
       .add(() => extractDir(titleId, dir))
       .catch((err) => {
-        if (!stop.signal.aborted) logEvent("error", `Extraction failed in ${dir}: ${errorMessage(err)}`, titleId);
+        if (!stop.signal.aborted) logEvent("error", `Extraction failed in ${dir}: ${errorMessage(err)}`, titleId, "extract", { kind: "extract_failed" });
       })
       .finally(() => queued.delete(key));
   }
@@ -93,7 +93,7 @@ async function extractDir(titleId: number, dir: string) {
   sevenZip ??= findSevenZip();
   const binary = await sevenZip;
   if (!binary) {
-    if (!warnedMissing) logEvent("warn", "7-Zip not found; archives won't be extracted (set RIPARR_7Z)");
+    if (!warnedMissing) logEvent("warn", "7-Zip not found; archives won't be extracted (set RIPARR_7Z)", null, "extract");
     warnedMissing = true;
     return;
   }
@@ -106,19 +106,26 @@ async function extractDir(titleId: number, dir: string) {
   }
   const files = entries.filter((e) => e.isFile()).map((e) => path.join(dir, e.name));
   const passwords = passwordsFor(titleId);
+  const sets = findArchiveSets(files);
+  logDebug("extract", () => `Scanning ${dir}: ${sets.length} archive set(s), ${passwords.length} known password(s), 7-Zip at ${binary}`, titleId);
 
-  for (const set of findArchiveSets(files)) {
+  for (const set of sets) {
     const entryPath = set.entry;
     const prior = one<{ status: Status }>("SELECT status FROM extractions WHERE entry_path = ?", entryPath);
     // Settled outcomes aren't retried; `incomplete` is retried as more parts arrive.
-    if (prior && prior.status !== "incomplete") continue;
+    if (prior && prior.status !== "incomplete") {
+      logDebug("extract", `Skipping ${set.name}: already ${prior.status.replace("_", " ")}`, titleId);
+      continue;
+    }
 
+    const started = Date.now();
     const result = await extractSet(set, { sevenZip: binary, destDir: dir, passwords, signal: stop.signal });
+    logDebug("extract", () => `${set.name} (${set.volumes.length} part(s)): ${result.status} after ${Math.round((Date.now() - started) / 1000)} s${"error" in result && result.error ? `: ${result.error}` : ""}`, titleId);
     switch (result.status) {
       case "extracted":
         record(titleId, entryPath, "extracted", null, result.files.length);
         if (settings.extractDeleteArchives) await deleteVolumes(set);
-        logEvent("info", `Extracted ${set.name} (${result.files.length} file(s))`, titleId);
+        logEvent("info", `Extracted ${set.name} (${result.files.length} file(s))`, titleId, "extract", { kind: "extracted", data: { count: result.files.length } });
         break;
       case "incomplete":
         record(titleId, entryPath, "incomplete", null, 0);
@@ -126,13 +133,13 @@ async function extractDir(titleId: number, dir: string) {
       case "wrong_password": {
         const message = `Archive ${set.name} needs a password${passwords.length ? " (the known ones didn't work)" : ""}; set it on one of the title's sources`;
         record(titleId, entryPath, "wrong_password", message, 0);
-        logEvent("warn", message, titleId);
+        logEvent("warn", message, titleId, "extract", { kind: "archive_password" });
         void notify({ event: "needs_attention", message, subject: { id: title.id, name: title.name } });
         break;
       }
       case "failed":
         record(titleId, entryPath, "failed", result.error, 0);
-        logEvent("error", `Couldn't extract ${set.name}: ${result.error}`, titleId);
+        logEvent("error", `Couldn't extract ${set.name}: ${result.error}`, titleId, "extract", { kind: "extract_failed" });
         break;
     }
   }

@@ -181,7 +181,7 @@ A source is `pending` → `ok` | `needs_attention` | `error`. A title's status r
 | `disk_files` | Video files found in each title's folder by the last scan (`titles.disk_scanned_at`) |
 | `settings` | Key/value JSON: app settings, auth (password hash, session secret, credential version), API key, worker heartbeat, disk status |
 | `host_accounts` | Per-host credentials as JSON |
-| `events` | Activity log (per title), pruned after 30 days |
+| `events` | Log entries: level (`debug`/`info`/`warn`/`error`), component, optional title (kept, unlinked, when the title is deleted). Written by `logEvent` (`lib/events.ts`), which also prints them for `docker logs`; debug only while enabled. Entries that are user-facing activity carry `activity` (a kind from `lib/activity.ts`) and `data` (JSON details: host, bytes, files…); History shows only those. Pruned after 30 days, debug after 3. |
 | `commands` | UI → worker mailbox |
 
 ## Web app

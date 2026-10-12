@@ -375,6 +375,67 @@ export const MIGRATIONS: Migration[] = [
     ) WITHOUT ROWID;
     ALTER TABLE titles ADD COLUMN disk_scanned_at INTEGER;
   `,
+  // Logging: a debug level, the area each entry comes from, and entries that outlive a deleted title.
+  `
+    CREATE TABLE events_new (
+      id        INTEGER PRIMARY KEY,
+      at        INTEGER NOT NULL,
+      level     TEXT    NOT NULL CHECK (level IN ('debug', 'info', 'warn', 'error')),
+      title_id  INTEGER REFERENCES titles(id) ON DELETE SET NULL,
+      -- Area of Riparr that wrote it: check, download, mirror, host, scan, extract, worker, web, …
+      component TEXT,
+      message   TEXT    NOT NULL
+    );
+    INSERT INTO events_new (id, at, level, title_id, message) SELECT id, at, level, title_id, message FROM events;
+    DROP TABLE events;
+    ALTER TABLE events_new RENAME TO events;
+    CREATE INDEX events_at ON events(at);
+    CREATE INDEX events_level_at ON events(level, at);
+    CREATE INDEX events_title ON events(title_id);
+  `,
+  // History: entries that are user-facing activity carry a kind (lib/activity.ts) and structured details.
+  // Earlier entries are tagged by their wording so existing history carries over.
+  `
+    ALTER TABLE events ADD COLUMN activity TEXT;
+    ALTER TABLE events ADD COLUMN data TEXT;
+    CREATE INDEX events_activity_at ON events(activity, at);
+
+    UPDATE events SET activity = 'downloaded' WHERE message LIKE 'Downloaded %';
+    UPDATE events SET activity = 'in_folder' WHERE message LIKE 'Already in the folder%';
+    UPDATE events SET activity = 'links_found' WHERE message LIKE 'Found % new link%';
+    UPDATE events SET activity = 'extracted' WHERE message LIKE 'Extracted %';
+    UPDATE events SET activity = 'links_added'
+      WHERE message LIKE 'Added % link(s) by hand' OR message LIKE 'Imported %' OR message LIKE 'API: added %'
+         OR message LIKE 'Click''n''Load: received %';
+    UPDATE events SET activity = 'title_added' WHERE message LIKE 'Added show "%' OR message LIKE 'Added movie "%';
+    UPDATE events SET activity = 'title_edited' WHERE message LIKE 'Title edited%';
+    UPDATE events SET activity = 'title_deleted' WHERE message LIKE 'Deleted show "%' OR message LIKE 'Deleted movie "%';
+    UPDATE events SET activity = 'title_paused' WHERE message LIKE 'Paused;%';
+    UPDATE events SET activity = 'title_resumed' WHERE message = 'Resumed';
+    UPDATE events SET activity = 'source_added' WHERE message LIKE 'Source added: %';
+    UPDATE events SET activity = 'source_changed' WHERE message LIKE 'Source page changed %';
+    UPDATE events SET activity = 'source_removed' WHERE message LIKE 'Source removed: %';
+    UPDATE events SET activity = 'source_enabled' WHERE message LIKE 'Source enabled: %';
+    UPDATE events SET activity = 'source_disabled' WHERE message LIKE 'Source disabled: %';
+    UPDATE events SET activity = 'link_retried' WHERE message LIKE 'Retrying % (by hand)';
+    UPDATE events SET activity = 'link_ignored' WHERE message LIKE 'Ignored %';
+    UPDATE events SET activity = 'root_folder_added' WHERE message LIKE 'Root folder added: %';
+    UPDATE events SET activity = 'root_folder_removed' WHERE message LIKE 'Root folder removed: %';
+    UPDATE events SET activity = 'settings_changed' WHERE message LIKE '% settings saved: %';
+    UPDATE events SET activity = 'needs_attention'
+      WHERE level = 'warn' AND (message LIKE 'This page no longer exists%' OR message LIKE 'This link has expired%'
+         OR message LIKE 'Captcha%' OR message LIKE 'Container is password-protected%' OR message LIKE 'Container rejected%'
+         OR message LIKE 'Blocked by an anti-bot%' OR message LIKE 'Still blocked%' OR message LIKE 'DLC: %');
+    UPDATE events SET activity = 'check_failed' WHERE level = 'error' AND message LIKE 'Check failed%';
+    UPDATE events SET activity = 'download_failed' WHERE message LIKE 'Failed: %';
+    UPDATE events SET activity = 'no_copy' WHERE message LIKE 'No working copy of %';
+    UPDATE events SET activity = 'extract_failed' WHERE message LIKE 'Couldn''t extract %' OR message LIKE 'Extraction failed in %';
+    UPDATE events SET activity = 'archive_password' WHERE message LIKE 'Archive % needs a password%';
+    UPDATE events SET activity = 'host_limited' WHERE message LIKE '% limited (%' OR message LIKE '% has been limited for %';
+    UPDATE events SET activity = 'host_limit_ended' WHERE message LIKE '% limit has ended%' OR message LIKE '% limit cleared by hand%';
+    UPDATE events SET activity = 'disk_low' WHERE message LIKE 'Only % GB free in %';
+    UPDATE events SET activity = 'disk_recovered' WHERE message LIKE 'Free space recovered in %';
+  `,
 ];
 
 /** Latest schema version (number of migrations). */

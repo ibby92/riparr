@@ -481,6 +481,34 @@ describe("pipeline + episodes already in the folder", () => {
     const { recentEvents } = await import("@/lib/events");
     expect(recentEvents(50, id).map((e) => e.message)).toContain(`Already in the folder, not downloaded: ${e01}`);
   });
+
+  it("records step-by-step debug entries while debug logging is on", async () => {
+    const { setDebugLogging } = await import("@/lib/events");
+    const { all } = await import("@/lib/db");
+    (await import("@/lib/settings")).saveSettings({ hostPriority: ["hostb", "hosta"] });
+    setDebugLogging(true);
+    try {
+      const name = "Debug.Show.S01E01.mkv";
+      files[name] = crypto.randomBytes(8_000);
+      mirrorCrates.dbg = [`/a/${name}`, `/b/${name}`];
+      const id = addTitle({ name: "Debug Show", url: `${base}/mcrate/dbg`, folder: "tv/Debug Show" });
+      await check(id, new AbortController().signal);
+      await drain(id);
+      const debug = all<{ component: string; message: string }>("SELECT component, message FROM events WHERE level = 'debug' AND title_id = ? ORDER BY id", id);
+      const has = (component: string, re: RegExp) => debug.some((d) => d.component === component && re.test(d.message));
+      expect(has("check", /^Checking http/)).toBe(true);
+      expect(has("check", /^GET .* → HTTP 200/)).toBe(true);
+      expect(has("check", /^Reader cnl2: 2 link\(s\)/)).toBe(true);
+      expect(has("download", /^Resolved .* 1 file\(s\)/)).toBe(true);
+      expect(has("mirror", /^Chosen: Debug\.Show\.S01E01\.mkv on hostb \(over hosta\); \(host order hostb > hosta\)/)).toBe(true);
+      expect(has("mirror", /^Not needed: .*\/a\/Debug\.Show/)).toBe(true);
+      expect(has("scan", /^Scanned .*Debug Show: 0 video file/)).toBe(true);
+      expect(has("download", /^Starting Debug\.Show\.S01E01\.mkv/)).toBe(true);
+      expect(has("download", /^Finished Debug\.Show\.S01E01\.mkv in \d+ s/)).toBe(true);
+    } finally {
+      setDebugLogging(false);
+    }
+  });
 });
 
 describe("polling a JS-rendered source for new content", () => {

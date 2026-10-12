@@ -2,7 +2,7 @@ import { closeDb, getDb } from "@/lib/db";
 import { pruneCommands, takeCommands, type Command } from "@/lib/commands";
 import { getSource, scheduleCheckNow, scheduleTitleCheckNow } from "@/lib/sources";
 import { recoverInterrupted } from "@/lib/links";
-import { logEvent, pruneEvents } from "@/lib/events";
+import { debugLogging, logDebug, logEvent, logThrottled, pruneEvents } from "@/lib/events";
 import { getSettings, HEARTBEAT_INTERVAL_MS, writeHeartbeat } from "@/lib/settings";
 import { startCnlServer } from "./cnl-server";
 import { linkSettled, resetFailedExtractions, stopExtraction } from "./extract-runner";
@@ -15,23 +15,28 @@ import { listRootFolders } from "@/lib/root-folders";
 
 const TICK_MS = 2_000;
 const DAY = 24 * 60 * 60 * 1000;
+const HOUR = 60 * 60 * 1000;
+
+const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 /** Title folders are rescanned this often, a few per tick, to notice files added by hand. */
 const RESCAN_MS = 30 * 60 * 1000;
 
 const shutdown = new AbortController();
 
 function handle(command: Command) {
+  const { type, ...args } = command;
+  logDebug("worker", `Command ${type} ${JSON.stringify(args)}`, "titleId" in command ? command.titleId : null);
   switch (command.type) {
     case "check_now": {
       const source = getSource(command.sourceId);
       if (!source) return;
       scheduleCheckNow(source.id);
-      logEvent("info", "Manual check requested", source.title_id);
+      logEvent("info", `Manual check requested: ${source.url}`, source.title_id, "check");
       break;
     }
     case "check_title":
       scheduleTitleCheckNow(command.titleId);
-      logEvent("info", "Manual check requested", command.titleId);
+      logEvent("info", "Manual check of every source requested", command.titleId, "check");
       break;
     case "cancel_link":
       cancelLink(command.linkId);
@@ -57,6 +62,7 @@ function handle(command: Command) {
               ? `Rescanned the folder: ${external.length} video file(s) not downloaded by Riparr${episodes.size ? ` (${episodes.size} episode(s))` : ""}`
               : `Rescanned the folder: nothing besides Riparr's own downloads (${found.length} file(s))`,
           command.titleId,
+          "scan",
         );
       }
       // Pending copies of episodes that turned up on disk aren't needed any more.
@@ -71,7 +77,7 @@ function cleanPartials() {
   try {
     sweepPartials(listRootFolders().map((r) => r.path));
   } catch (err) {
-    console.error("[riparr] partial cleanup failed", err);
+    logThrottled("partials", HOUR, "warn", `Partial download cleanup failed: ${errorText(err)}`, null, "disk");
   }
 }
 
@@ -80,7 +86,7 @@ function rescanStale() {
     try {
       scanTitle(titleId);
     } catch (err) {
-      console.error(`[riparr] folder scan of title ${titleId} failed`, err);
+      logThrottled(`scan:${titleId}`, HOUR, "warn", `Folder scan failed: ${errorText(err)}`, titleId, "scan");
     }
   }
 }
@@ -97,11 +103,11 @@ async function startClickNLoad() {
   const port = Number(process.env.RIPARR_CNL_PORT ?? 9666);
   try {
     const server = await startCnlServer(port);
-    console.log(`[riparr] click'n'load listening on :${port}`);
+    logEvent("info", `Click'n'Load listening on port ${port}`, null, "cnl");
     return server;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    logEvent("error", `Click'n'Load listener could not start on port ${port}: ${message}`);
+    logEvent("error", `Click'n'Load listener could not start on port ${port}: ${message}`, null, "cnl");
     return null;
   }
 }
@@ -110,14 +116,17 @@ async function main() {
   getDb(); // open and migrate before anything else
   recoverInterrupted();
   writeHeartbeat();
-  logEvent("info", "Worker started");
-  console.log("[riparr] worker started");
+  logEvent("info", `Worker started (Node ${process.version}${debugLogging() ? ", debug logging on" : ""})`, null, "worker");
 
   const timers = [
     setInterval(() => {
       try {
         tick();
       } catch (err) {
+        // A bug or a database problem would repeat every tick: log it every 10 minutes at most.
+        if (logThrottled("tick", 10 * 60_000, "error", `Worker loop failed: ${errorText(err)}`, null, "worker") && err instanceof Error && err.stack) {
+          logDebug("worker", `Stack: ${err.stack}`);
+        }
         console.error("[riparr] tick failed", err);
       }
     }, TICK_MS),
@@ -136,12 +145,12 @@ async function main() {
   const cnl = await startClickNLoad();
 
   const stop = (signal: string) => {
-    console.log(`[riparr] ${signal} received, stopping worker`);
+    logEvent("info", `${signal} received, stopping`, null, "worker");
     timers.forEach(clearInterval);
     cnl?.close();
     stopExtraction();
     shutdown.abort();
-    logEvent("info", "Worker stopped");
+    logEvent("info", "Worker stopped", null, "worker");
     closeDb();
     process.exit(0);
   };

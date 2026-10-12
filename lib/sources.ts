@@ -76,7 +76,14 @@ export function createSource(titleId: number, input: SourceInput): number {
   return Number(result.lastInsertRowid);
 }
 
-export function updateSource(id: number, input: SourceInput) {
+/**
+ * Saves a source. A new URL (e.g. a fresh link for an expired page) starts
+ * over: status back to pending, the old error cleared, and due for a check
+ * right away. Returns whether the URL changed.
+ */
+export function updateSource(id: number, input: SourceInput): { urlChanged: boolean } {
+  const before = one<{ url: string }>("SELECT url FROM sources WHERE id = ?", id);
+  const urlChanged = before !== undefined && before.url !== input.url;
   run(
     "UPDATE sources SET url = ?, password = ?, poll_interval_min = ?, enabled = ?, poll = ? WHERE id = ?",
     input.url,
@@ -86,6 +93,8 @@ export function updateSource(id: number, input: SourceInput) {
     input.poll ? 1 : 0,
     id,
   );
+  if (urlChanged) run("UPDATE sources SET status = 'pending', last_error = NULL, next_check_at = 0 WHERE id = ?", id);
+  return { urlChanged };
 }
 
 /** Removes the source. Links it found stay with the title. */

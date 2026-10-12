@@ -2,18 +2,19 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
-import { ChevronRight, FolderOpen, Pause, Pencil, Play, Plus, RefreshCw } from "lucide-react";
-import { recentEvents } from "@/lib/events";
+import { ChevronRight, FolderOpen, History, Pause, Pencil, Play, Plus, RefreshCw } from "lucide-react";
 import { listExtractions, listLinks } from "@/lib/links";
 import { listRootFolders } from "@/lib/root-folders";
 import { listSources } from "@/lib/sources";
 import { getTitle } from "@/lib/titles";
-import { Card, Poster, StatusPill, Tag, formatBytes } from "../../_kit";
+import { Card, EmptyState, Poster, StatusPill, Tag, formatBytes } from "../../_kit";
 import { episodeExtras, episodeRows, hostLimits, summarize, titleFileViews } from "../../_data/progress";
 import { AddSourceForm } from "../../_library/add-source-form";
 import { LinksList } from "../../_library/links-list";
 import { TitleSkeleton } from "../../_library/skeletons";
-import { EpisodesPanel, FilesCard, FilesPanel, HistoryPanel, SourcesList, SourcesSummary } from "../../_library/title-panels";
+import { EpisodesPanel, FilesCard, FilesPanel, SourcesList, SourcesSummary } from "../../_library/title-panels";
+import { ActivityList } from "../../_library/activity-list";
+import { historyEvents } from "../../_data/history";
 import { Note, PathText, TabLinks, TitleProgressBar, progressLabel, titlePill, titleReason } from "../../_library/ui";
 import { AutoRefresh } from "../../auto-refresh";
 import { AddLinksForm, ImportDlcForm } from "../add-links-form";
@@ -57,7 +58,7 @@ async function TitleDetail({
   // Files with no episode number: a movie's files, or packs and extras of a show. Standby copies stay hidden.
   const extras = files.filter((f) => (isShow ? f.episode == null : true) && f.state !== "standby");
   const archives = listExtractions(title.id);
-  const events = recentEvents(200, title.id);
+  const { events } = historyEvents({ titleId: title.id, period: "all" }, now, 200);
   const onDiskPaths = new Set(files.filter((f) => f.state === "done" && f.local_path).map((f) => f.local_path));
   const onDisk = onDiskPaths.size + known.disk.filter((d) => !onDiskPaths.has(d.path)).length;
   const busy = links.some((l) => l.status === "resolving" || l.status === "downloading");
@@ -239,7 +240,14 @@ async function TitleDetail({
 
       {tab === "files" && <FilesPanel title={title} files={files} disk={known.disk} archives={archives} freeBytes={freeBytes} now={now} />}
 
-      {tab === "history" && <HistoryPanel events={events} now={now} />}
+      {tab === "history" &&
+        (events.length ? (
+          <ActivityList events={events} now={now} showTitle={false} />
+        ) : (
+          <div className="card">
+            <EmptyState icon={History} title="No history yet" body="Downloads, new links, changes you make and problems for this title will be listed here." />
+          </div>
+        ))}
     </div>
   );
 }

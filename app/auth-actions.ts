@@ -12,6 +12,7 @@ import {
   setCredentials,
 } from "@/lib/auth";
 import { credentialsInput } from "@/lib/credentials";
+import { logDebug, logEvent } from "@/lib/events";
 import { clientIp, endSession, startSession } from "@/lib/session";
 
 export type AuthFormState = { error?: string; errors?: Record<string, string[] | undefined>; username?: string };
@@ -27,13 +28,20 @@ export async function login(_prev: AuthFormState, formData: FormData): Promise<A
   const password = String(formData.get("password") ?? "");
   const ip = await clientIp();
 
-  if (loginBlocked(ip)) return { error: "Too many failed attempts. Try again in a few minutes.", username };
+  if (loginBlocked(ip)) {
+    logDebug("auth", `Sign-in from ${ip} refused: too many failed attempts`);
+    return { error: "Too many failed attempts. Try again in a few minutes.", username };
+  }
   if (!checkCredentials(username, password)) {
     recordLoginFailure(ip);
+    // Never the password; the username helps spot guessing.
+    logEvent("warn", `Failed sign-in for "${username.slice(0, 64)}" from ${ip}`, null, "auth");
+    if (loginBlocked(ip)) logEvent("warn", `Sign-ins from ${ip} blocked for 15 minutes after repeated failures`, null, "auth");
     return { error: "Wrong username or password", username };
   }
   clearLoginFailures(ip);
   await startSession(username);
+  logEvent("info", `Signed in as ${username} from ${ip}`, null, "auth");
   redirect(safeNext(formData.get("next")));
 }
 
@@ -46,6 +54,7 @@ export async function setup(_prev: AuthFormState, formData: FormData): Promise<A
   }
   setCredentials(parsed.data.username, parsed.data.password);
   apiKey(); // create it now so it's ready in Settings
+  logEvent("info", `Login created for ${parsed.data.username}`, null, "auth");
   await startSession(parsed.data.username);
   redirect("/");
 }

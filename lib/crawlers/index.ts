@@ -26,6 +26,10 @@ export const sources: ContainerSource[] = [cnl2Source, plainSource];
 
 const TIMEOUT_MS = 30_000;
 
+const EXPIRED = /\b(?:link|page) has expired\b/i;
+const EXPIRED_MSG =
+  "This link has expired on the site. Open the show's page there in your browser, copy the new download-page link and paste it with Replace URL on this source";
+
 const HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
@@ -116,9 +120,14 @@ async function fetchPage(url: string, opts: CrawlOptions, init: RequestInit = {}
     signal: AbortSignal.any([opts.signal, AbortSignal.timeout(TIMEOUT_MS)]),
   });
   const html = await res.text();
+  opts.log?.(`GET ${url} → HTTP ${res.status}, ${Math.round(html.length / 1024)} KB${identity !== DEFAULT_IDENTITY ? " (with FlareSolverr clearance)" : ""}`);
   if (!res.ok) {
     if ((res.status === 403 || res.status === 503 || res.status === 429) && CHALLENGE.test(html)) {
       throw new ChallengeError(CHALLENGE_MSG);
+    }
+    // Temporary links (mkvdrama's /c/… aliases last about a day): the show is still there, the link isn't.
+    if (res.status === 410 && (res.headers.get("x-container-alias-expired") === "1" || EXPIRED.test(html))) {
+      throw new NeedsAttentionError(EXPIRED_MSG);
     }
     // The site removed the page: retrying won't help, a person needs to replace or remove the source.
     if (res.status === 404 || res.status === 410) {
@@ -334,6 +343,7 @@ async function runSources(page: Page, opts: CrawlOptions): Promise<{ result: Cra
 /** Password form, sources and attention checks on an already-fetched page. */
 async function crawlPage(page: Page, opts: CrawlOptions, endpoint: string | null): Promise<CrawlResult> {
   if (opts.password && PASSWORD_INPUT.test(page.html)) {
+    opts.log?.("Page asks for a password; submitting the source's password");
     const submitted = await submitPassword(page, opts.password, opts, endpoint);
     if (submitted) {
       if (PASSWORD_INPUT.test(submitted.html) || WRONG_PASSWORD.test(submitted.html)) {
@@ -344,10 +354,18 @@ async function crawlPage(page: Page, opts: CrawlOptions, endpoint: string | null
   }
 
   const crate = (await crawlCrateApi(page, opts)) ?? (await crawlDlcExport(page, opts));
-  if (crate) return crate;
+  if (crate) {
+    opts.log?.(`Reader ${crate.source}: ${crate.links.length} link(s)${crate.items?.length ? `, ${crate.items.length} with details` : ""}`);
+    return crate;
+  }
+  opts.log?.("No crate-api list or DLC export on the page; trying Click'n'Load, .dlc and plain links");
 
   const { result, dlcError } = await runSources(page, opts);
-  if (result) return result;
+  if (result) {
+    opts.log?.(`Reader ${result.source}: ${result.links.length} link(s)`);
+    return result;
+  }
+  if (dlcError) opts.log?.(`DLC failed: ${dlcError}`);
 
   const attention = detectAttention(page.html, opts.password);
   if (attention) {
@@ -359,6 +377,7 @@ async function crawlPage(page: Page, opts: CrawlOptions, endpoint: string | null
     const hint = dlcError.includes("unreachable") ? "" : " — try Click'n'Load in a browser";
     throw new NeedsAttentionError(`DLC: ${dlcError}${hint}`);
   }
+  opts.log?.("No host links found on the page");
   return { links: [], source: "none" };
 }
 
@@ -375,11 +394,15 @@ export async function crawlContainer(url: string, opts: CrawlOptions): Promise<C
   const identity = clearance
     ? { cookies: cookiePairsFor(clearance.cookies, url), userAgent: clearance.userAgent }
     : DEFAULT_IDENTITY;
+  if (clearance) opts.log?.(`Reusing FlareSolverr clearance for ${new URL(url).host}`);
   try {
     return await crawlPage(await fetchPage(url, opts, {}, identity), opts, endpoint);
   } catch (err) {
     if (!(err instanceof ChallengeError) || !endpoint) throw err;
+    opts.log?.("Page is behind an anti-bot challenge; retrying through FlareSolverr");
     forgetClearance(url);
   }
-  return crawlPage(await fetchViaFlareSolverr(endpoint, url, opts), opts, endpoint);
+  const page = await fetchViaFlareSolverr(endpoint, url, opts);
+  opts.log?.(`FlareSolverr fetched the page (${Math.round(page.html.length / 1024)} KB)`);
+  return crawlPage(page, opts, endpoint);
 }

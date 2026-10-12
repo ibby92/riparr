@@ -13,7 +13,7 @@ import { createTmdbClient } from "@/lib/tmdb";
 import type { FormState } from "./_add/types";
 import { sendCommand } from "@/lib/commands";
 import { decryptDlc, dlcLinks } from "@/lib/crawlers";
-import { logEvent } from "@/lib/events";
+import { logDebug, logEvent } from "@/lib/events";
 import { addLinks, getLink, requeueLink, setLinkStatus } from "@/lib/links";
 import { getRootFolder } from "@/lib/root-folders";
 import {
@@ -24,6 +24,7 @@ import {
   setSourceEnabled,
   sourceInput,
   titlePasswords,
+  updateSource,
   type SourceInput,
 } from "@/lib/sources";
 import {
@@ -86,7 +87,9 @@ async function tmdbMeta(type: TitleType, tmdbId: number, fallback: Record<string
 function cachePosterLater(type: TitleType, tmdbId: number, posterPath: string | null, force = false) {
   if (!posterPath) return;
   after(async () => {
-    await cachePoster({ tmdbId, type, posterPath }, { configDir: configDir(), fetch: fetchFor("host"), force }).catch(() => {});
+    await cachePoster({ tmdbId, type, posterPath }, { configDir: configDir(), fetch: fetchFor("host"), force })
+      .then((r) => logDebug("tmdb", `Poster for ${type} ${tmdbId} cached at ${r?.path ?? "?"}`))
+      .catch((err) => logEvent("warn", `Couldn't cache the poster for ${type} ${tmdbId}: ${err instanceof Error ? err.message : String(err)}`, null, "tmdb"));
   });
 }
 
@@ -179,7 +182,7 @@ export async function addTitle(_prev: FormState, formData: FormData): Promise<Fo
     return { values, message: `Couldn't add the title: ${err instanceof Error ? err.message : String(err)}` };
   }
 
-  logEvent("info", `Added ${input.type} "${input.name}"`, id);
+  logEvent("info", `Added ${input.type} "${input.name}"`, id, "web", { kind: "title_added" });
   // Before the first check: episodes already in the folder count as on disk.
   sendCommand({ type: "scan_title", titleId: id });
   if (input.monitored && sources.rows.some((s) => s.input.poll)) sendCommand({ type: "check_title", titleId: id });
@@ -212,6 +215,8 @@ export async function editTitle(_prev: FormState, formData: FormData): Promise<F
   }
 
   updateTitle(id, input);
+  const changed = changedFields(current, input);
+  if (changed.length) logEvent("info", `Title edited (${changed.join(", ")})`, id, "web", { kind: "title_edited", data: { changes: changed } });
   if (!input.monitored) sendCommand({ type: "cancel_title", titleId: id });
   // The folder may have moved.
   sendCommand({ type: "scan_title", titleId: id });
@@ -223,10 +228,22 @@ export async function editTitle(_prev: FormState, formData: FormData): Promise<F
   redirect(`/titles/${id}`);
 }
 
+const EDITABLE = ["name", "year", "type", "tmdb_id", "folder", "root_folder_id", "season_folders", "naming", "monitored"] as const;
+
+/** Which of a title's editable fields differ (booleans in the form are 0/1 in the database). */
+function changedFields(before: object, after: object): string[] {
+  const norm = (v: unknown) => (v === true ? 1 : v === false ? 0 : (v ?? null));
+  const a = before as Record<string, unknown>;
+  const b = after as Record<string, unknown>;
+  return EDITABLE.filter((k) => norm(a[k]) !== norm(b[k]));
+}
+
 export async function removeTitle(formData: FormData) {
   await requireSession();
   const id = parseId(formData.get("id"));
   const title = getTitle(id);
+  // Logged first, so the entry (kept after the title is gone) still says which title it was.
+  if (title) logEvent("info", `Deleted ${title.type} "${title.name}"; downloaded files stay on disk`, id, "web", { kind: "title_deleted", data: { name: title.name } });
   deleteTitle(id);
   sendCommand({ type: "cancel_title", titleId: id });
   if (title?.tmdb_id) {
@@ -242,6 +259,7 @@ export async function toggleTitle(formData: FormData) {
   const id = parseId(formData.get("id"));
   const monitored = formData.get("monitored") === "1";
   setTitleMonitored(id, monitored);
+  logEvent("info", monitored ? "Resumed" : "Paused; its downloads stop and resume later", id, "web", { kind: monitored ? "title_resumed" : "title_paused" });
   if (!monitored) sendCommand({ type: "cancel_title", titleId: id });
   refresh();
 }
@@ -270,6 +288,7 @@ export async function addSource(_prev: SourceFormState, formData: FormData): Pro
   if (findSourceByUrl(parsed.data.url)) return { error: "That page is already a source" };
   const before = titlePasswords(title.id);
   const id = createSource(title.id, parsed.data);
+  logEvent("info", `Source added: ${parsed.data.url}`, title.id, "web", { kind: "source_added", data: { url: parsed.data.url } });
   if (title.monitored && parsed.data.poll) sendCommand({ type: "check_now", sourceId: id });
   // A new password may unlock archives that failed before.
   if (parsed.data.password && !before.includes(parsed.data.password)) sendCommand({ type: "extract_title", titleId: title.id });
@@ -277,15 +296,64 @@ export async function addSource(_prev: SourceFormState, formData: FormData): Pro
   return { message: "Source added" };
 }
 
+/**
+ * Edits a source: URL, password, check interval and whether its page is read.
+ * An empty password keeps the saved one; "clear_password" removes it.
+ */
+export async function editSource(_prev: SourceFormState, formData: FormData): Promise<SourceFormState> {
+  await requireSession();
+  const source = getSource(parseId(formData.get("id")));
+  if (!source) return { error: "This source no longer exists" };
+  const typed = String(formData.get("password") ?? "").trim();
+  const password = formData.get("clear_password") === "on" ? "" : typed || (source.password ?? "");
+  const parsed = sourceInput.safeParse({
+    url: formData.get("url"),
+    password,
+    poll_interval_min: formData.get("poll_interval_min"),
+    enabled: source.enabled === 1,
+    poll: formData.get("poll") === "on",
+  });
+  if (!parsed.success) return { error: Object.values(z.flattenError(parsed.error).fieldErrors).flat()[0] ?? "Invalid source" };
+  const taken = findSourceByUrl(parsed.data.url);
+  if (taken && taken.id !== source.id) return { error: "That page is already a source" };
+
+  const before = titlePasswords(source.title_id);
+  const { urlChanged } = updateSource(source.id, parsed.data);
+  if (urlChanged) {
+    logEvent("info", `Source page changed from ${source.url} to ${parsed.data.url}`, source.title_id, "web", {
+      kind: "source_changed",
+      data: { from: source.url, to: parsed.data.url },
+    });
+  }
+  else logDebug("web", `Source ${source.url} saved (every ${parsed.data.poll_interval_min} min, ${parsed.data.poll ? "reads the page" : "Click'n'Load only"})`, source.title_id);
+  // Check a new page (or one just switched to being read) straight away.
+  if (source.monitored && parsed.data.enabled && parsed.data.poll && (urlChanged || !source.poll)) {
+    sendCommand({ type: "check_now", sourceId: source.id });
+  }
+  if (parsed.data.password && !before.includes(parsed.data.password)) sendCommand({ type: "extract_title", titleId: source.title_id });
+  refresh();
+  return { message: urlChanged ? "Saved; checking the new page" : "Saved" };
+}
+
 export async function removeSource(formData: FormData) {
   await requireSession();
-  deleteSource(parseId(formData.get("id")));
+  const source = getSource(parseId(formData.get("id")));
+  if (!source) return;
+  deleteSource(source.id);
+  logEvent("info", `Source removed: ${source.url}`, source.title_id, "web", { kind: "source_removed", data: { url: source.url } });
   refresh();
 }
 
 export async function toggleSource(formData: FormData) {
   await requireSession();
-  setSourceEnabled(parseId(formData.get("id")), formData.get("enabled") === "1");
+  const source = getSource(parseId(formData.get("id")));
+  if (!source) return;
+  const enabled = formData.get("enabled") === "1";
+  setSourceEnabled(source.id, enabled);
+  logEvent("info", `Source ${enabled ? "enabled" : "disabled"}: ${source.url}`, source.title_id, "web", {
+    kind: enabled ? "source_enabled" : "source_disabled",
+    data: { url: source.url },
+  });
   refresh();
 }
 
@@ -298,7 +366,10 @@ export async function checkSourceNow(formData: FormData) {
 
 export async function retryLink(formData: FormData) {
   await requireSession();
-  requeueLink(parseId(formData.get("id")));
+  const link = getLink(parseId(formData.get("id")));
+  if (!link) return;
+  requeueLink(link.id);
+  logEvent("info", `Retrying ${link.url} (by hand)`, link.title_id, "web", { kind: "link_retried", data: { url: link.url, host: link.host } });
   refresh();
 }
 
@@ -307,6 +378,7 @@ export async function ignoreLink(formData: FormData) {
   const link = getLink(parseId(formData.get("id")));
   if (!link) return;
   setLinkStatus(link.id, "ignored");
+  logEvent("info", `Ignored ${link.url}`, link.title_id, "web", { kind: "link_ignored", data: { url: link.url, host: link.host } });
   sendCommand({ type: "cancel_link", linkId: link.id });
   refresh();
 }
@@ -325,7 +397,7 @@ export async function addLinksManually(_prev: AddLinksState, formData: FormData)
 
   const password = String(formData.get("archive_password") ?? "").trim() || null;
   const added = addLinks(title.id, null, urls, password);
-  logEvent("info", `Added ${added} of ${urls.length} link(s) by hand`, title.id);
+  logEvent("info", `Added ${added} of ${urls.length} link(s) by hand`, title.id, "web", { kind: "links_added", data: { count: added, via: "hand" } });
   refresh();
   const skipped = tokens.length - urls.length;
   return {
@@ -351,7 +423,7 @@ export async function importDlc(_prev: AddLinksState, formData: FormData): Promi
     const urls = dlcLinks(await decryptDlc(await file.text()));
     if (urls.length === 0) return { error: "The DLC container has no links" };
     const added = addLinks(title.id, null, urls);
-    logEvent("info", `Imported ${file.name}: ${added} new of ${urls.length} link(s)`, title.id);
+    logEvent("info", `Imported ${file.name}: ${added} new of ${urls.length} link(s)`, title.id, "web", { kind: "links_added", data: { count: added, via: file.name } });
     refresh();
     return { message: `Imported ${added} new link(s)${urls.length > added ? `, ${urls.length - added} already known` : ""}` };
   } catch (err) {

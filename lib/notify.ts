@@ -1,3 +1,4 @@
+import { logDebug, logEvent } from "./events";
 import { getSettings, NOTIFY_EVENTS, type NotifyEvent } from "./settings";
 
 export type Notification = {
@@ -57,6 +58,7 @@ export async function notify(n: Notification, fetchImpl: typeof fetch = fetch): 
 
   const results = await Promise.allSettled(sends);
   const errors = results.flatMap((r) => (r.status === "rejected" ? [String(r.reason?.message ?? r.reason)] : []));
-  for (const e of errors) console.error(`[riparr] notification failed: ${e}`);
+  for (const e of errors) logEvent("warn", `Notification "${title}" not delivered: ${e}`, n.subject?.id ?? null, "notify");
+  if (sends.length > errors.length) logDebug("notify", `Sent "${title}" to ${sends.length - errors.length} target(s)`, n.subject?.id ?? null);
   return errors;
 }

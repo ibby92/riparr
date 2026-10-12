@@ -1,4 +1,5 @@
 import http from "node:http";
+import { logDebug, logEvent } from "@/lib/events";
 import { receiveClickNLoad } from "@/lib/clicknload";
 import { decryptCnl2, decryptDlc, dlcLinks } from "@/lib/crawlers";
 
@@ -42,6 +43,7 @@ function reply(res: http.ServerResponse, status: number, body: string, type = "t
 export async function handleCnl(req: http.IncomingMessage, res: http.ServerResponse) {
   const path = new URL(req.url ?? "/", "http://localhost").pathname.replace(/\/+$/, "") || "/";
 
+  logDebug("cnl", `${req.method} ${path} from ${req.socket.remoteAddress ?? "?"}`);
   if (req.method === "OPTIONS") return reply(res, 204, "");
   if (req.method === "GET") {
     if (path === "/jdcheck.js") return reply(res, 200, JDCHECK, "text/javascript");
@@ -62,12 +64,13 @@ export async function handleCnl(req: http.IncomingMessage, res: http.ServerRespo
         : path === "/flash/addcrypted" // Click'n'Load v1: `crypted` is a whole DLC container
           ? dlcLinks(await decryptDlc(form.get("crypted") ?? ""))
           : (form.get("urls") ?? "").split(/[\r\n]+/);
+    logDebug("cnl", () => `${path}: ${links.length} link(s) from ${source ?? "an unknown page"}${form.get("passwords")?.trim() ? " with an archive password" : ""}`);
     const result = receiveClickNLoad(links, source, form.get("passwords")?.trim() || null);
-    console.log(`[riparr] click'n'load: ${result.added}/${result.received} new link(s) from ${source ?? "unknown page"}`);
+    logDebug("cnl", `Filed under title ${result.titleId} (source ${result.sourceId}${result.created ? ", new title" : ""}): ${result.added}/${result.received} new`, result.titleId);
     return reply(res, 200, "success\r\n");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[riparr] click'n'load request failed:", message);
+    logEvent("warn", `Click'n'Load request to ${path} failed: ${message}`, null, "cnl");
     return reply(res, 400, `failed ${message}\r\n`);
   }
 }

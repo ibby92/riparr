@@ -58,7 +58,7 @@ The same page sets the defaults for new titles:
 The title page shows progress (downloaded, in progress, waiting, missing) and has four tabs:
 
 - **Episodes:** each episode by season, with status, host and size. "Also on gofile" means a mirror exists. Movies show their files instead.
-- **Sources:** each source page with its last check, next check, links found and status, plus every link with **Retry** and **Ignore**.
+- **Sources:** each source page with its last check, next check, links found and status, plus every link with **Retry** and **Ignore**. **Edit** changes a source's address, password, check interval and whether its page is read. On a source that needs attention the button reads **Replace URL**. The same list is on the title's **Edit** page.
 - **Files:** what Riparr downloaded, what was [already in the folder](#episodes-already-in-the-folder) (with **Rescan folder**), and the archives Riparr extracted.
 - **History:** this title's activity.
 
@@ -128,6 +128,8 @@ Riparr reads a page in this order and uses the first approach that finds links:
 4. **Plain host links** anywhere in the page.
 
 If a site answers "too many requests", Riparr waits as long as the site asks before checking again. This doesn't count as an error. A page that returns 404 or 410 is gone: the source needs attention until you replace or remove it.
+
+Some sites hand out **temporary links**: mkvdrama's `/c/…` download pages expire after about a day, and a new one is only issued on the show's page, behind a check meant for people. When a link has expired, the source needs attention with "This link has expired on the site". Open the show's page in your browser, copy the new download-page link and paste it with **Replace URL**. The source keeps its links and history, and is checked again right away.
 
 Links on hosts Riparr can't download from (e.g. send.now, vikingfile, fileditch) are listed as *ignored* with "Riparr can't download from … yet". They aren't failures and don't trigger notifications.
 
@@ -242,7 +244,27 @@ Once all of a title's downloads have settled, Riparr extracts finished archives 
 
 ## History and notifications
 
-**Activity → History** lists everything Riparr did, newest first, grouped by day. Filter by title, level (info, warnings, errors) and period. Each title page has the same list for that title. Entries are kept for 30 days.
+**Activity → History** is your activity feed: what Riparr downloaded, what changed in your library, and anything that needed you. It isn't the technical log (that's [System → Logs](#logs-and-debug-logging)), so worker restarts, retries and rescans don't appear here.
+
+- **Summary** for the period: files downloaded and for how many titles, data, new links found, and problems.
+- **Show:** *Everything*, *Downloads* (downloads, files already in the folder, new links, extracted archives), *Library changes* (titles and sources you added, edited, paused or removed, links you retried or ignored, settings changes with old → new values) or *Problems* (sources needing attention or failing repeatedly, failed downloads, files with no working copy, archive problems, host limits, low disk space, and when those ended).
+- **Rows** read as sentences with the title's poster, the episode, host and size, e.g. "Downloaded S01E16 of Irreplaceable · pixeldrain · 791 MB". A burst of downloads of one title becomes one row ("Downloaded 3 episodes of Irreplaceable (S01E14–E16)") with the files listed underneath.
+- Filter by title and period. Each title page's **History** tab shows the same feed for that title.
+
+Entries are kept for 30 days, and stay after their title is deleted.
+
+### Logs and debug logging
+
+**System → Logs** shows the full log for troubleshooting: every level, the area of Riparr each entry comes from (source checks, mirror selection, downloads, hosts, folder scans, extraction…), and the title. Filter by minimum level, area and title, or search the messages.
+
+| Level | Used for |
+| --- | --- |
+| Debug | Step-by-step detail: each page request and its HTTP status, which reader found the links, how a link resolved, which copy was chosen and why, where each file went and how fast, host limits starting and ending. Off by default. |
+| Info | What happened: titles and sources added or changed, links found, files downloaded or extracted, settings changed, sign-ins. |
+| Warning | Something went wrong and Riparr is handling it (a retry, a host limit, a check that will be retried), or a source needs attention. |
+| Error | Something failed for good or keeps failing: a download gave up, an archive can't be extracted, a source failed 3 checks in a row. |
+
+To troubleshoot, click **Turn on debug logging** on System → Logs, reproduce the problem (for example **Check now** on the title), then read the entries with the level set to *Everything*. Debug entries are kept for 3 days; turn it off again when you're done. The same lines are written to the container output, so `docker logs riparr` shows them too. Logs never contain passwords, tokens, API keys or proxy credentials.
 
 **Settings → Notifications**:
 

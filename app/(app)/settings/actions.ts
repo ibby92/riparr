@@ -16,10 +16,11 @@ import { ACCOUNT_FIELDS, listHostAccounts, saveHostAccount } from "@/lib/host-ac
 import { testFlareSolverr } from "@/lib/crawlers";
 import { maskProxyUrl, proxiedFetch, proxyUrlError, proxyUrlSetting, publicIp, unmaskProxyUrl } from "@/lib/net";
 import { notify } from "@/lib/notify";
-import { addRootFolder, normalizeRootPath, removeRootFolder, rootFolderError } from "@/lib/root-folders";
+import { addRootFolder, getRootFolder, normalizeRootPath, removeRootFolder, rootFolderError } from "@/lib/root-folders";
 import { clearTmdbCache, createTmdbClient } from "@/lib/tmdb";
 import { KNOWN_HOSTS } from "@/lib/host-ids";
-import { getSettings, NOTIFY_EVENTS, saveSettings, type NotifyEvent } from "@/lib/settings";
+import { getSettings, NOTIFY_EVENTS, saveSettings, type AppSettings, type NotifyEvent } from "@/lib/settings";
+import { logEvent } from "@/lib/events";
 
 /**
  * State of a settings page's form. Each page has its own action that parses only
@@ -81,12 +82,29 @@ const mediaInput = z.object({
   cnlEnabled: checkbox,
 });
 
+/** Settings whose values are never written to the log (only that they changed): keys and URLs that can carry credentials. */
+const SECRET_SETTINGS = new Set<string>(["tmdbApiKey", "proxyUrl", "notifyWebhookUrl", "notifyAppriseUrl"]);
+
+function show(v: unknown) {
+  return Array.isArray(v) ? v.join(" > ") : typeof v === "string" ? `"${v}"` : String(v);
+}
+
+/** Saves settings and logs what changed (old → new), with secret values left out. */
+function saveLogged(section: string, changes: Partial<AppSettings>) {
+  const before = getSettings() as unknown as Record<string, unknown>;
+  saveSettings(changes);
+  const diffs = Object.entries(changes)
+    .filter(([k, v]) => v !== undefined && JSON.stringify(before[k]) !== JSON.stringify(v))
+    .map(([k, v]) => (SECRET_SETTINGS.has(k) ? `${k} changed` : `${k} ${show(before[k])} → ${show(v)}`));
+  if (diffs.length) logEvent("info", `${section} settings saved: ${diffs.join(", ")}`, null, "web", { kind: "settings_changed", data: { section, changes: diffs } });
+}
+
 export async function saveMediaSettings(_prev: SettingsState, formData: FormData): Promise<SettingsState> {
   await requireSession();
   const values = formValues(formData);
   const parsed = mediaInput.safeParse(fields(formData));
   if (!parsed.success) return failed(parsed.error, values);
-  saveSettings(parsed.data);
+  saveLogged("Media Management", parsed.data);
   return saved();
 }
 
@@ -100,13 +118,16 @@ export async function addRootFolderAction(_prev: RootFolderState, formData: Form
   const error = rootFolderError(p);
   if (error) return { error, path: raw };
   addRootFolder(p);
+  logEvent("info", `Root folder added: ${p}`, null, "web", { kind: "root_folder_added", data: { path: p } });
   refresh();
   return { message: `Added ${p}` };
 }
 
 export async function removeRootFolderAction(formData: FormData) {
   await requireSession();
-  removeRootFolder(Number(formData.get("id")));
+  const id = Number(formData.get("id"));
+  const root = getRootFolder(id);
+  if (removeRootFolder(id) && root) logEvent("info", `Root folder removed: ${root.path}`, null, "web", { kind: "root_folder_removed", data: { path: root.path } });
   refresh();
 }
 
@@ -130,7 +151,7 @@ export async function saveDownloadSettings(_prev: SettingsState, formData: FormD
   const known: string[] = KNOWN_HOSTS.map((h) => h.id);
   const picked = [...new Set(formData.getAll("hostPriority").map(String))].filter((id) => known.includes(id));
   const hostPriority = [...picked, ...known.filter((id) => !picked.includes(id))];
-  saveSettings({ ...rest, hostPriority, bytesPerSecond: Math.round(mbPerSecond * 1024 * 1024) });
+  saveLogged("Downloads", { ...rest, hostPriority, bytesPerSecond: Math.round(mbPerSecond * 1024 * 1024) });
   return saved();
 }
 
@@ -150,7 +171,14 @@ export async function saveHostAccounts(_prev: SettingsState, formData: FormData)
       // Secrets are never rendered back, so an empty secret input means "keep".
       next[field.key] = value || (field.secret ? (current[field.key] ?? "") : "");
     }
+    const changed = Object.keys(next).filter((k) => (current[k] ?? "") !== next[k]);
     saveHostAccount(host, next);
+    if (changed.length) {
+      logEvent("info", `Host account for ${host} updated (${changed.join(", ")})`, null, "web", {
+        kind: "settings_changed",
+        data: { section: "Hosts", changes: [`${host} account (${changed.join(", ")}) changed`] },
+      });
+    }
   }
   return saved();
 }
@@ -181,10 +209,10 @@ export async function saveConnectionSettings(_prev: SettingsState, formData: For
 
   const clearKey = formData.get("clearTmdbApiKey") === "on";
   if (clearKey || tmdbApiKey) {
-    saveSettings({ tmdbApiKey: clearKey ? "" : tmdbApiKey! });
+    saveLogged("Connections", { tmdbApiKey: clearKey ? "" : tmdbApiKey! });
     clearTmdbCache();
   }
-  saveSettings(rest);
+  saveLogged("Connections", rest);
   return saved();
 }
 
@@ -235,7 +263,7 @@ export async function saveNotificationSettings(_prev: SettingsState, formData: F
   const parsed = notificationsInput.safeParse(fields(formData));
   if (!parsed.success) return failed(parsed.error, values);
   const notifyEvents = formData.getAll("notifyEvents").filter((e): e is NotifyEvent => String(e) in NOTIFY_EVENTS);
-  saveSettings({ ...parsed.data, notifyEvents });
+  saveLogged("Notifications", { ...parsed.data, notifyEvents });
   return saved();
 }
 
@@ -260,6 +288,7 @@ export async function changePassword(_prev: SecurityState, formData: FormData): 
   const parsed = credentialsInput.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { errors: z.flattenError(parsed.error).fieldErrors, username };
   setCredentials(parsed.data.username, parsed.data.password);
+  logEvent("info", `Login changed for ${parsed.data.username}; other sessions signed out`, null, "auth");
   // Every session was just invalidated, including this one; start a fresh one.
   await startSession(parsed.data.username);
   refresh();
@@ -271,11 +300,13 @@ export async function setAuthentication(formData: FormData) {
   const mode = formData.get("mode") === "none" ? "none" : "forms";
   if (mode === "forms" && !currentUsername()) throw new Error("Create a login before enabling authentication");
   setAuthMode(mode);
+  logEvent(mode === "none" ? "warn" : "info", mode === "none" ? "Authentication turned off" : "Authentication turned on", null, "auth");
   refresh();
 }
 
 export async function newApiKey() {
   await requireSession();
   regenerateApiKey();
+  logEvent("info", "API key regenerated; the old one no longer works", null, "auth");
   refresh();
 }

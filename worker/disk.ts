@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { logEvent } from "@/lib/events";
+import { logDebug, logEvent, logThrottled } from "@/lib/events";
 import { notify } from "@/lib/notify";
 import { listRootFolders } from "@/lib/root-folders";
 import { getSettings, writeDiskStatus } from "@/lib/settings";
@@ -27,18 +27,20 @@ export function diskIsLow(rootPath: string, now = Date.now()): boolean {
     freeBytes = stats.bavail * stats.bsize;
     totalBytes = stats.blocks * stats.bsize;
   } catch (err) {
-    console.error(`[riparr] free-space check failed for ${rootPath}`, err);
+    // Every 30 s while it lasts; once every 10 minutes in the log is plenty.
+    logThrottled(`disk:${rootPath}`, 10 * 60_000, "warn", `Can't read free space of ${rootPath}: ${err instanceof Error ? err.message : String(err)}`, null, "disk");
   }
 
   const minFree = getSettings().minFreeGb * GB;
   const low = freeBytes !== null && minFree > 0 && freeBytes < minFree;
   if (low && !known?.low) {
     const message = `Only ${(freeBytes! / GB).toFixed(1)} GB free in ${rootPath}; new downloads there are paused`;
-    logEvent("warn", message);
+    logEvent("warn", message, null, "disk", { kind: "disk_low", data: { path: rootPath, bytes: freeBytes! } });
     void notify({ event: "needs_attention", message });
   } else if (!low && known?.low) {
-    logEvent("info", `Free space recovered in ${rootPath}; downloads resumed`);
+    logEvent("info", `Free space recovered in ${rootPath}; downloads resumed`, null, "disk", { kind: "disk_recovered", data: { path: rootPath } });
   }
+  if (!known) logDebug("disk", () => `${rootPath}: ${freeBytes === null ? "free space unknown" : `${(freeBytes / GB).toFixed(1)} GB free`}, floor ${getSettings().minFreeGb} GB`);
   roots.set(rootPath, { checkedAt: now, low, freeBytes, totalBytes });
   publish(now);
   return low;

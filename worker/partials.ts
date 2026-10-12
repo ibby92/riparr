@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { all } from "@/lib/db";
-import { logEvent } from "@/lib/events";
+import { logDebug, logEvent } from "@/lib/events";
 
 export const PARTIAL_DIR = ".riparr-partial";
 const HOUR = 60 * 60 * 1000;
@@ -43,6 +43,7 @@ export function partialPathFor(dir: string, fileId: number, linkUrl: string, key
     if (sizeOf(legacy) === bytesDone) {
       try {
         fs.renameSync(legacy, current);
+        logDebug("disk", `Adopted pre-upgrade partial ${path.basename(legacy)} as ${path.basename(current)}`);
       } catch {
         // Leave it; the download starts over.
       }
@@ -94,6 +95,7 @@ export function sweepPartials(roots: string[], now = Date.now(), minAgeMs = HOUR
       if (legacy.get(name) === st.size) continue; // adopted when its download resumes
       try {
         fs.unlinkSync(full);
+        logDebug("disk", `Removed leftover partial ${full} (${(st.size / 1024 ** 2).toFixed(1)} MB)`);
         files++;
         bytes += st.size;
       } catch {
@@ -101,6 +103,6 @@ export function sweepPartials(roots: string[], now = Date.now(), minAgeMs = HOUR
       }
     }
   }
-  if (files) logEvent("info", `Removed ${files} leftover partial download(s), ${(bytes / 1024 ** 3).toFixed(1)} GB`);
+  if (files) logEvent("info", `Removed ${files} leftover partial download(s), ${(bytes / 1024 ** 3).toFixed(1)} GB`, null, "disk");
   return { files, bytes };
 }

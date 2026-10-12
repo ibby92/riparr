@@ -15,6 +15,7 @@ Most configuration lives in the web UI (**Settings**) and is stored in the datab
 | `RIPARR_CNL_PORT` | `9666` | Click'n'Load listener port |
 | `RIPARR_PROXY_URL` | (unset) | Proxy for container sites. Used when no proxy is set in Settings. |
 | `RIPARR_AUTH` | (unset) | `none` turns login off. For recovering from a lost password. |
+| `RIPARR_LOG_LEVEL` | (unset) | `debug` keeps debug logging on regardless of the System → Logs switch, e.g. to see start-up in detail. |
 | `RIPARR_7Z` | (auto) | Path to a 7-Zip binary. By default `7z`, `7zz` or `7za` is found on `PATH`, preferring one with RAR5 support. |
 | `RIPARR_DOWNLOADS_DIR` | `/downloads` | Only used when upgrading a pre-v1 database: that folder becomes the first root folder. |
 
@@ -107,6 +108,6 @@ These aren't configurable, but are useful to know:
 | Free-space check | Every 30 s per root folder |
 | Title folder rescan | When a title is added or edited, after a check finds new links, and every 30 minutes |
 | Database backups | Before every upgrade, in `/config/backups`; the newest 5 are kept |
-| Activity log retention | 30 days |
+| Log retention | 30 days; debug entries 3 days |
 | Login throttle | 10 failures per IP per 15 minutes |
 | Session lifetime | 30 days |

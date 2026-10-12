@@ -6,6 +6,7 @@ import { refresh } from "next/cache";
 import { z } from "zod";
 import { configDir, getDb } from "@/lib/db";
 import { backupDatabase, backupsDir, listBackups } from "@/lib/db/backup";
+import { debugForcedByEnv, logEvent, setDebugLogging } from "@/lib/events";
 import { requireSession } from "@/lib/session";
 
 export type BackupState = { error?: string; message?: string; at?: number };
@@ -29,5 +30,21 @@ export async function deleteBackup(formData: FormData) {
   // Only files listBackups knows, inside the backups folder.
   if (!listBackups(configDir()).some((b) => b.name === name)) return;
   fs.rmSync(path.join(backupsDir(configDir()), name), { force: true });
+  refresh();
+}
+
+/** Turns debug logging on or off (System → Logs). */
+export async function setLogLevel(formData: FormData) {
+  await requireSession();
+  const debug = formData.get("level") === "debug";
+  setDebugLogging(debug);
+  logEvent(
+    "info",
+    debug
+      ? "Debug logging turned on; detailed entries are kept for 3 days"
+      : `Debug logging turned off${debugForcedByEnv() ? " (RIPARR_LOG_LEVEL=debug still keeps it on)" : ""}`,
+    null,
+    "web",
+  );
   refresh();
 }

@@ -1,4 +1,5 @@
 import { api, ApiError, idParam, jsonBody, sourceDto } from "@/lib/api";
+import { sendCommand } from "@/lib/commands";
 import { deleteSource, findSourceByUrl, getSource, sourceInput, updateSource } from "@/lib/sources";
 
 type Ctx = RouteContext<"/api/v1/sources/[id]">;
@@ -23,7 +24,8 @@ export const PATCH = api(async (req, ctx: Ctx) => {
   });
   const taken = findSourceByUrl(input.url);
   if (taken && taken.id !== source.id) throw new ApiError(409, "That URL is already a source");
-  updateSource(source.id, input);
+  const { urlChanged } = updateSource(source.id, input);
+  if (urlChanged && source.monitored && input.enabled && input.poll) sendCommand({ type: "check_now", sourceId: source.id });
   return sourceDto(getSource(source.id)!);
 });
 

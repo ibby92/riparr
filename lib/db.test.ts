@@ -194,12 +194,14 @@ describe("database", () => {
     expect(takeCommands()).toEqual([]);
   });
 
-  it("records events newest first, with the title name", () => {
-    logEvent("info", "first", titleId);
-    logEvent("error", "second", titleId);
-    expect(recentEvents(2, titleId).map((e) => [e.message, e.title_name])).toEqual([
-      ["second", "Doctor X"],
-      ["first", "Doctor X"],
+  it("lists recent activity newest first, with the title name, leaving out plain log entries", () => {
+    logEvent("info", "first", titleId, "download", { kind: "downloaded", data: { host: "gofile", bytes: 5 } });
+    logEvent("info", "worker detail", titleId, "worker");
+    logEvent("error", "second", titleId, "download", { kind: "download_failed" });
+    expect(recentEvents(5, titleId).map((e) => [e.message, e.title_name, e.activity])).toEqual([
+      ["second", "Doctor X", "download_failed"],
+      ["first", "Doctor X", "downloaded"],
     ]);
+    expect(JSON.parse(recentEvents(5, titleId)[1].data!)).toEqual({ host: "gofile", bytes: 5 });
   });
 });

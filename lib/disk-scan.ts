@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { all, getDb, one, run } from "./db";
+import { logDebug } from "./events";
 import { parseEpisode } from "./episodes";
 import { getTitle, type TitleType } from "./titles";
 
@@ -66,7 +67,10 @@ export function diskEpisode(filePath: string, type: TitleType): { season: number
 export function scanTitle(titleId: number, now = Date.now()): DiskFile[] | null {
   const title = getTitle(titleId);
   if (!title) return null;
-  if (!fs.existsSync(title.root_path)) return null;
+  if (!fs.existsSync(title.root_path)) {
+    logDebug("scan", `Not scanning: root folder ${title.root_path} isn't reachable; keeping the last scan`, titleId);
+    return null;
+  }
   const folder = path.join(title.root_path, title.folder);
   const files: DiskFile[] = findVideos(folder).map((f) => ({ title_id: titleId, ...f, ...diskEpisode(f.path, title.type) }));
 
@@ -82,6 +86,10 @@ export function scanTitle(titleId: number, now = Date.now()): DiskFile[] | null 
     db.exec("ROLLBACK");
     throw err;
   }
+  logDebug("scan", () => {
+    const eps = files.filter((f) => f.episode != null).length;
+    return `Scanned ${folder}: ${files.length} video file(s), ${eps} with an episode number`;
+  }, titleId);
   return files;
 }
 

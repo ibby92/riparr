@@ -306,4 +306,17 @@ describe("removed source pages", () => {
     expect(err).toBeInstanceOf(NeedsAttentionError);
     expect(err.message).toMatch(/no longer exists/);
   });
+
+  it.each([
+    ["mkvdrama's expired-alias header", new Headers({ "x-container-alias-expired": "1" }), "<title>MkvDrama</title>"],
+    ["an expired-link page", new Headers(), "<title>Temporary link expired</title><p>This link has expired.</p>"],
+  ])("explains an expired temporary link (%s) instead of calling the page gone", async (_name, headers, body) => {
+    const err = await crawlContainer("https://site.example/c/alias", {
+      password: null,
+      signal: new AbortController().signal,
+      fetch: (async () => new Response(body, { status: 410, headers })) as unknown as typeof fetch,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(NeedsAttentionError);
+    expect(err.message).toMatch(/link has expired.*Replace URL/);
+  });
 });

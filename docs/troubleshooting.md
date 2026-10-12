@@ -2,6 +2,8 @@
 
 Start with the **dashboard** (titles that need a look show their reason), the **Queue** (what's waiting and why) and the title's **History** tab. Most problems explain themselves there.
 
+If they don't, turn on debug logging on **System → Logs**, reproduce the problem (e.g. **Check now**), and read the entries with the level set to *Everything* and the area narrowed (source checks, downloads…). They show each request Riparr made and what it decided. When asking for help, include those lines; they contain no passwords or keys.
+
 - [Source messages](#source-messages)
 - [Link and download messages](#link-and-download-messages)
 - [Archives](#archives)
@@ -25,7 +27,11 @@ The page shows a real captcha (reCAPTCHA, hCaptcha, Turnstile), which neither Ri
 
 ### "Container is password-protected — set its password" / "Container rejected the password"
 
-Set or correct the password on the source (title page → **Sources** → **Manage**).
+Set or correct the password with **Edit** on the source (title page → **Sources**, or the title's **Edit** page).
+
+### "This link has expired on the site"
+
+The source is a temporary link. mkvdrama's `/c/…` pages, for example, last about a day, and new ones come from the show's page after a check meant for people, which Riparr doesn't get around. Open the show's page in your browser, copy the new download-page link and use **Replace URL** on the source (title page → **Sources**, or **Edit**). For a show that's still airing, a source on a site with a stable page (such as viewcrate) needs less attention.
 
 ### "This page no longer exists on the site (HTTP 404/410)"
 

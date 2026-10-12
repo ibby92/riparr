@@ -10,6 +10,8 @@ export type CrawlOptions = {
    * Cloudflare/DDoS-Guard challenge are retried through it. Optional for backward compatibility.
    */
   flaresolverrUrl?: string | null;
+  /** Debug trace of what the crawler fetched and decided (no secrets). */
+  log?: (message: string) => void;
 };
 
 /** Extra details some containers publish per link (shown in the UI). */

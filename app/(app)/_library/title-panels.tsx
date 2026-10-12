@@ -1,14 +1,14 @@
 // Tab panels of the title page (server components; forms post to the title Server Actions).
 import Link from "next/link";
-import { CircleAlert, CircleCheck, FolderOpen, History, Info, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import { FolderOpen, Info, RefreshCw, TriangleAlert } from "lucide-react";
 import type { DiskFile } from "@/lib/disk-scan";
-import type { RiparrEvent } from "@/lib/events";
 import type { ExtractionRow } from "@/lib/links";
 import type { SourceWithTitle } from "@/lib/sources";
 import type { TitleWithStats } from "@/lib/titles";
 import { Card, EmptyState, HostChip, ProgressBar, StatusPill, episodeLabel, formatAgo, formatBytes, type PillState } from "../_kit";
 import { siteOf, type EpisodeRow, type FileView } from "../_data/progress";
-import { checkSourceNow, removeSource, rescanTitle, retryExtractions, toggleSource } from "../titles/actions";
+import { rescanTitle, retryExtractions } from "../titles/actions";
+import { SourceActions } from "./source-actions";
 import { EpisodePill, PathText, SourceDot, sourceTone } from "./ui";
 import { hostLabelOf } from "./host-label";
 
@@ -197,8 +197,6 @@ function Kv({ k, children }: { k: string; children: React.ReactNode }) {
   );
 }
 
-const small = "btn h-9 min-h-0 px-3 text-[13px]";
-
 export function SourcesList({ title, sources, now }: { title: TitleWithStats; sources: SourceWithTitle[]; now: number }) {
   if (sources.length === 0) {
     return <p className="px-4 py-6 text-center text-sm text-muted md:px-5">No sources yet. Add the page or pages that list this title&apos;s links.</p>;
@@ -233,27 +231,12 @@ export function SourcesList({ title, sources, now }: { title: TitleWithStats; so
                 <span className="min-w-0 break-words">{s.last_error}</span>
               </p>
             )}
-            <div className="flex flex-wrap gap-2">
-              <form action={checkSourceNow}>
-                <input type="hidden" name="id" value={s.id} />
-                <button className={small} disabled={!s.enabled || !s.poll || !title.monitored}>
-                  <RefreshCw size={15} strokeWidth={1.75} aria-hidden="true" />
-                  Check
-                </button>
-              </form>
-              <form action={toggleSource}>
-                <input type="hidden" name="id" value={s.id} />
-                <input type="hidden" name="enabled" value={s.enabled ? "0" : "1"} />
-                <button className={small}>{s.enabled ? "Disable" : "Enable"}</button>
-              </form>
-              <form action={removeSource}>
-                <input type="hidden" name="id" value={s.id} />
-                <button className={`${small} btn-danger`} aria-label={`Remove source ${siteOf(s.url)}`}>
-                  <Trash2 size={15} strokeWidth={1.75} aria-hidden="true" />
-                  Remove
-                </button>
-              </form>
-            </div>
+            <SourceActions
+              source={{ id: s.id, url: s.url, poll: s.poll === 1, enabled: s.enabled === 1, poll_interval_min: s.poll_interval_min, hasPassword: Boolean(s.password) }}
+              canCheck={Boolean(s.enabled && s.poll && title.monitored)}
+              needsAttention={s.status === "needs_attention"}
+              label={siteOf(s.url)}
+            />
           </li>
         );
       })}
@@ -432,69 +415,3 @@ export function FilesPanel({
     </div>
   );
 }
-
-/* ------------------------------------------------------------------ history */
-
-const LEVEL = {
-  info: { icon: Info, className: "bg-surface-2 text-muted", label: "Info" },
-  warn: { icon: CircleAlert, className: "bg-warn-soft text-warn", label: "Warning" },
-  error: { icon: TriangleAlert, className: "bg-critical-soft text-critical", label: "Error" },
-} as const;
-
-function dayLabel(at: number, now: number) {
-  const d = new Date(at);
-  const today = new Date(now);
-  const yesterday = new Date(now - 86_400_000);
-  if (d.toDateString() === today.toDateString()) return "Today";
-  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-  return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
-}
-
-export function HistoryPanel({ events, now }: { events: RiparrEvent[]; now: number }) {
-  if (events.length === 0) {
-    return (
-      <div className="card">
-        <EmptyState icon={History} title="No history yet" body="Downloads, source checks and problems for this title will be listed here." />
-      </div>
-    );
-  }
-  const days: { label: string; items: RiparrEvent[] }[] = [];
-  for (const e of events) {
-    const label = dayLabel(e.at, now);
-    const last = days.at(-1);
-    if (last?.label === label) last.items.push(e);
-    else days.push({ label, items: [e] });
-  }
-  return (
-    <div className="card overflow-hidden">
-      {days.map((d) => (
-        <section key={d.label}>
-          <h3 className="label-caps border-b border-border bg-surface-2 px-4 py-2 md:px-5">{d.label}</h3>
-          <ul className="divide-y divide-border">
-            {d.items.map((e) => {
-              const lvl = /^Downloaded|extracted/i.test(e.message) && e.level === "info" ? { ...LEVEL.info, icon: CircleCheck, className: "bg-good-soft text-good" } : LEVEL[e.level];
-              const Icon = lvl.icon;
-              return (
-                <li key={e.id} className="grid grid-cols-[26px_minmax(0,1fr)] gap-x-3 px-4 py-3 md:grid-cols-[26px_minmax(0,1fr)_64px] md:px-5">
-                  <span className={`grid size-[26px] place-items-center rounded-sm ${lvl.className}`}>
-                    <Icon size={14} strokeWidth={2} aria-hidden="true" />
-                    <span className="sr-only">{lvl.label}</span>
-                  </span>
-                  <span className="min-w-0 self-center break-words text-sm text-fg">{e.message}</span>
-                  <time
-                    dateTime={new Date(e.at).toISOString()}
-                    title={new Date(e.at).toLocaleString()}
-                    className="col-start-2 text-xs tabular-nums text-muted md:col-start-3 md:self-center md:text-right"
-                  >
-                    {new Date(e.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
-                  </time>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      ))}
-    </div>
-  );
-}
-

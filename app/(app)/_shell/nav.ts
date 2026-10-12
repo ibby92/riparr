@@ -57,6 +57,7 @@ export const NAV: NavEntry[] = [
     icon: MonitorCog,
     items: [
       { href: "/system/status", label: "Status" },
+      { href: "/system/logs", label: "Logs" },
       { href: "/system/backups", label: "Backups" },
     ],
   },

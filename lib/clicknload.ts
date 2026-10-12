@@ -80,6 +80,8 @@ export function receiveClickNLoad(rawLinks: string[], source: string | null, arc
     "info",
     `Click'n'Load: received ${links.length} link(s), ${added} new${created ? " (new title)" : ""}`,
     match.title_id,
+    "cnl",
+    { kind: "links_added", data: { count: added, via: "Click'n'Load" } },
   );
   return { titleId: match.title_id, sourceId: match.id, received: links.length, added, created };
 }

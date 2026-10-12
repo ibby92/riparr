@@ -110,9 +110,11 @@ describe("migration 8 (titles, sources, root folders)", () => {
     db.exec("DELETE FROM sources WHERE id = 3");
     expect(row("SELECT source_id FROM links WHERE id = 10")).toEqual({ source_id: null });
     db.exec("DELETE FROM titles WHERE id = 3");
-    for (const t of ["links", "files", "events", "extractions"]) {
+    for (const t of ["links", "files", "extractions"]) {
       expect(row(`SELECT COUNT(*) AS n FROM ${t}`)).toEqual({ n: 0 });
     }
+    // Since migration 11, log entries outlive their title.
+    expect(row("SELECT COUNT(*) AS n FROM events WHERE title_id IS NULL")).toEqual({ n: 1 });
   });
 
   it("works on an empty database (no root folder is invented)", () => {
@@ -167,5 +169,55 @@ describe("migration 10 (files already on disk)", () => {
     db.exec("INSERT INTO disk_files (title_id, path, size, season, episode, mtime) VALUES (1, '/srv/media/X/X.E01.mkv', 5, 1, 1, 1)");
     db.exec("PRAGMA foreign_keys = ON; DELETE FROM titles WHERE id = 1");
     expect(db.prepare("SELECT COUNT(*) AS n FROM disk_files").get()).toEqual({ n: 0 });
+  });
+});
+
+describe("migration 11 (debug logging)", () => {
+  it("keeps events, allows debug, records the component, and keeps entries when their title is deleted", () => {
+    const db = databaseAt(10);
+    db.exec(`
+      INSERT INTO root_folders (id, path, created_at) VALUES (1, '/srv/media', 1);
+      INSERT INTO titles (id, type, name, root_folder_id, folder, created_at, updated_at) VALUES (1, 'show', 'X', 1, 'X', 1, 1);
+      INSERT INTO events (id, at, level, title_id, message) VALUES (5, 10, 'warn', 1, 'old warning');
+    `);
+    expect(() => db.exec("INSERT INTO events (at, level, message) VALUES (1, 'debug', 'x')")).toThrow();
+    migrate(db);
+    expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length });
+    expect({ ...db.prepare("SELECT id, level, title_id, component, message FROM events WHERE id = 5").get() }).toEqual({
+      id: 5,
+      level: "warn",
+      title_id: 1,
+      component: null,
+      message: "old warning",
+    });
+    db.exec("INSERT INTO events (at, level, component, message) VALUES (2, 'debug', 'check', 'reader crate-api')");
+    expect(() => db.exec("INSERT INTO events (at, level, message) VALUES (3, 'trace', 'x')")).toThrow();
+    db.exec("PRAGMA foreign_keys = ON; DELETE FROM titles WHERE id = 1");
+    expect({ ...db.prepare("SELECT title_id, message FROM events WHERE id = 5").get() }).toEqual({ title_id: null, message: "old warning" });
+  });
+});
+
+describe("migration 12 (activity for History)", () => {
+  it("adds activity and data columns and tags earlier entries by their wording", () => {
+    const db = databaseAt(11);
+    const add = db.prepare("INSERT INTO events (at, level, message) VALUES (1, ?, ?)");
+    const samples: [string, string, string | null][] = [
+      ["info", "Downloaded Irreplaceable.S01E16.mkv from pixeldrain", "downloaded"],
+      ["info", 'Added show "Between Steps"', "title_added"],
+      ["info", "Found 10 new link(s) via crate-api", "links_found"],
+      ["warn", "This link has expired on the site. Open the show's page…", "needs_attention"],
+      ["warn", "pixeldrain limited (daily transfer limit); its downloads resume at …", "host_limited"],
+      ["error", "Failed: https://gofile.io/d/x (gone)", "download_failed"],
+      ["info", "Media Management settings saved: cnlEnabled true → false", "settings_changed"],
+      ["info", "Worker started", null],
+      ["warn", "Attempt 1/5 failed for https://x: boom", null],
+      ["info", "Manual check requested", null],
+    ];
+    for (const [level, message] of samples) add.run(level, message);
+    migrate(db);
+    expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length });
+    const tagged = db.prepare("SELECT message, activity, data FROM events ORDER BY id").all() as { message: string; activity: string | null; data: string | null }[];
+    expect(tagged.map((r) => r.activity)).toEqual(samples.map((s) => s[2]));
+    expect(tagged.every((r) => r.data === null)).toBe(true);
   });
 });

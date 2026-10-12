@@ -1,7 +1,9 @@
+import path from "node:path";
 import PQueue from "p-queue";
 import { downloadFile } from "@/lib/download";
 import { HostOfflineError, NeedsAttentionError, RateLimitError, StallError } from "@/lib/errors";
-import { logEvent } from "@/lib/events";
+import type { ActivityData } from "@/lib/activity";
+import { logDebug, logEvent } from "@/lib/events";
 import { hostAccount } from "@/lib/host-accounts";
 import {
   addHostUsage,
@@ -39,7 +41,7 @@ import {
   type Link,
   type TitleFile,
 } from "@/lib/links";
-import { coveredByDisk, groupMirrors, planMirrors } from "@/lib/mirrors";
+import { coveredByDisk, groupMirrors, mirrorNameKey, planMirrors } from "@/lib/mirrors";
 import { externalDiskFiles, scanTitle } from "@/lib/disk-scan";
 import { fetchFor } from "@/lib/net";
 import { notify } from "@/lib/notify";
@@ -151,12 +153,35 @@ export function selectAndSettle(titleId: number, now = clock.now()) {
   if (title && files.some((f) => f.fileStatus === "standby" || f.fileStatus === "queued")) {
     if (title.disk_scanned_at === null) scanTitle(titleId);
     const onDisk = coveredByDisk(files, externalDiskFiles(titleId), title.type, new Set(jobs.keys()));
-    for (const c of onDisk) updateFile(c.fileId, { status: "skipped", local_path: c.path });
+    for (const c of onDisk) {
+      updateFile(c.fileId, { status: "skipped", local_path: c.path });
+      logDebug("mirror", () => `Skipping ${files.find((f) => f.fileId === c.fileId)?.name}: already in the folder as ${path.basename(c.path)}`, titleId);
+    }
     if (onDisk.length) files = titleFiles(titleId);
   }
   const plan = planMirrors(files, priority, now);
   setFileStatuses(plan.promote, "queued");
   setFileStatuses(plan.standby, "standby");
+  if (plan.promote.length || plan.standby.length) {
+    logDebug("mirror", () => {
+      const describe = (ids: number[]) =>
+        ids.map((id) => files.find((f) => f.fileId === id)).map((f) => (f ? `${f.name} on ${f.host}` : "?")).join(", ");
+      // Each chosen copy with the hosts it was preferred over.
+      const chosen = plan.promote.map((id) => {
+        const f = files.find((x) => x.fileId === id);
+        if (!f) return "?";
+        const others = files.filter((x) => x.fileId !== id && mirrorNameKey(x.name) === mirrorNameKey(f.name) && x.size === f.size).map((x) => x.host);
+        return `${f.name} on ${f.host}${others.length ? ` (over ${[...new Set(others)].join(", ")})` : ""}`;
+      });
+      return [
+        chosen.length ? `Chosen: ${chosen.join(", ")}` : null,
+        plan.standby.length ? `On standby: ${describe(plan.standby)}` : null,
+        `(host order ${priority.join(" > ")})`,
+      ]
+        .filter(Boolean)
+        .join("; ");
+    }, titleId);
+  }
   settleLinks(titleId, new Set(plan.covered));
   notifyBlockedFiles(titleId, files, now);
 }
@@ -184,7 +209,7 @@ function notifyBlockedFiles(titleId: number, files: TitleFile[], now: number) {
     const title = getTitle(titleId);
     const hosts = [...new Set(copies.map((f) => hostLabel(f.host)))].join(", ");
     const message = `No working copy of ${copies[0].name} (tried ${hosts})`;
-    logEvent("error", message, titleId);
+    logEvent("error", message, titleId, "mirror", { kind: "no_copy", data: { files: [{ name: copies[0].name, season: copies[0].season, episode: copies[0].episode, size: copies[0].size }] } });
     void notify({ event: "needs_attention", message, subject: title && { id: title.id, name: title.name } });
   }
 }
@@ -208,20 +233,30 @@ function settleLinks(titleId: number, covered: Set<number>) {
 
     const downloaded = files.filter((f) => f.status === "done" || f.status === "skipped");
     const link = getLink(linkId)!;
+    const rows = new Map(listFiles(linkId).map((r) => [r.id, r]));
+    const details = (list: typeof downloaded): ActivityData => ({
+      host: link.host,
+      bytes: list.reduce((n, f) => n + (rows.get(f.id)?.size ?? 0), 0),
+      files: list.map((f) => {
+        const r = rows.get(f.id);
+        return { name: f.name, season: r?.season ?? null, episode: r?.episode ?? null, size: r?.size ?? null };
+      }),
+    });
     if (downloaded.length && downloaded.every((f) => f.status === "skipped")) {
       // Nothing transferred: the files were already in the title's folder.
       setLinkStatus(linkId, "done", { attempts: 0 });
       const names = downloaded.length === 1 ? downloaded[0].name : `${downloaded.length} files`;
-      logEvent("info", `Already in the folder, not downloaded: ${names}`, titleId);
+      logEvent("info", `Already in the folder, not downloaded: ${names}`, titleId, "download", { kind: "in_folder", data: details(downloaded) });
     } else if (downloaded.length) {
       setLinkStatus(linkId, "done", { attempts: 0 });
       const names = downloaded.length === 1 ? downloaded[0].name : `${downloaded.length} files`;
       const viaMirrors = downloaded.length < files.length ? ` (${files.length - downloaded.length} from other hosts)` : "";
-      logEvent("info", `Downloaded ${names} from ${link.host}${viaMirrors}`, titleId);
+      const fetched = downloaded.filter((f) => f.status === "done");
+      logEvent("info", `Downloaded ${names} from ${link.host}${viaMirrors}`, titleId, "download", { kind: "downloaded", data: details(fetched.length ? fetched : downloaded) });
       void notify({ event: "download_done", message: `Downloaded ${names}`, subject });
     } else {
       setLinkStatus(linkId, "mirror", { attempts: 0 });
-      logEvent("info", `Not needed: ${link.url} (its files came from preferred hosts)`, titleId);
+      logDebug("mirror", `Not needed: ${link.url} (its files came from preferred hosts)`, titleId);
     }
     linkSettled(titleId);
   }
@@ -270,7 +305,13 @@ async function resolveLink(link: Link, signal: AbortSignal) {
   if (!wanted) return;
   try {
     setLinkStatus(link.id, "resolving", { attempts: wanted.current.attempts });
-    await resolveFiles(link, wanted.title, signal);
+    const started = Date.now();
+    const { remote } = await resolveFiles(link, wanted.title, signal);
+    logDebug(
+      "download",
+      () => `Resolved ${link.url} in ${Date.now() - started} ms: ${remote.length} file(s), ${formatSize(remote.reduce((n, f) => n + (f.size ?? 0), 0))}${remote.length <= 5 ? ` (${remote.map((f) => f.name).join(", ")})` : ""}`,
+      link.title_id,
+    );
     markResolved(link.id);
     recordHostOk(link.host);
   } catch (err) {
@@ -323,6 +364,9 @@ async function downloadOne(title: TitleWithStats, link: Link, row: FileRow, file
 
   updateFile(fileId, { status: "downloading", error: null });
   const settings = getSettings();
+  const started = Date.now();
+  let startOffset = 0;
+  logDebug("download", () => `Starting ${file.name} (${file.size != null ? formatSize(file.size) : "size unknown"}) from ${link.host} → ${finalPath}`, link.title_id);
   let lastWrite = 0;
   let lastBytes: number | null = null;
   // Data used per host: bytes fetched this run, counted from where the transfer started.
@@ -341,7 +385,9 @@ async function downloadOne(title: TitleWithStats, link: Link, row: FileRow, file
       bytesPerSecond: settings.bytesPerSecond || null,
       stallMs: settings.stallMinutes > 0 ? settings.stallMinutes * MINUTE : null,
       onStart: (offset) => {
-        counted = latest = offset;
+        counted = latest = startOffset = offset;
+        if (offset > 0) logDebug("download", `Resuming ${file.name} at ${formatSize(offset)}`, link.title_id);
+        else if (row.bytes_done > 0) logDebug("download", `${link.host} ignored the resume request for ${file.name}; starting over`, link.title_id);
       },
       onProgress: (bytes) => {
         latest = bytes;
@@ -363,6 +409,12 @@ async function downloadOne(title: TitleWithStats, link: Link, row: FileRow, file
       stalls: 0,
     });
     recordHostOk(link.host);
+    logDebug("download", () => {
+      if (result.status === "skipped") return `Skipped ${file.name}: an identical file is already at ${result.path}`;
+      const secs = Math.max(1, (Date.now() - started) / 1000);
+      const fetched = Math.max(0, latest - startOffset);
+      return `Finished ${file.name} in ${Math.round(secs)} s (${formatSize(result.bytes)}, ${formatSize(fetched / secs)}/s) → ${result.path}`;
+    }, link.title_id);
   } catch (err) {
     updateFile(fileId, {
       status: signal.aborted ? "queued" : "failed",
@@ -389,12 +441,13 @@ function handleFailure(link: Link, attempts: number, err: unknown, signal: Abort
     if (current && (current.status === "resolving" || current.status === "downloading")) {
       setLinkStatus(link.id, "queued", { attempts });
     }
+    logDebug("download", `Stopped ${link.url} (worker stopping or cancelled); it resumes later`, link.title_id);
     return;
   }
   if (err instanceof HostOfflineError) {
     setLinkStatus(link.id, "offline", { error: message, attempts });
     failLinkFiles(link.id, message);
-    logEvent("warn", `Offline: ${link.url} (${message})`, link.title_id);
+    logEvent("warn", `Offline: ${link.url} (${message})`, link.title_id, "download");
     linkSettled(link.title_id);
     return;
   }
@@ -408,18 +461,28 @@ function handleFailure(link: Link, attempts: number, err: unknown, signal: Abort
       const limit = recordHostLimit(link.host, retryAt, reason, now);
       retryAt = limit.until;
       if (limit.fresh) {
-        logEvent("warn", `${hostLabel(link.host)} limited (${reason}); its downloads resume at ${new Date(retryAt).toISOString()}`);
+        logEvent("warn", `${hostLabel(link.host)} limited (${reason}); its downloads resume at ${new Date(retryAt).toISOString()}`, null, "host", {
+          kind: "host_limited",
+          data: { host: link.host, until: retryAt },
+        });
       }
     }
     setLinkStatus(link.id, "queued", { error: message, attempts, retryAt });
     parkLinkFiles(link.id);
-    logEvent("info", `Rate limited by ${link.host}, retrying in ${Math.ceil((retryAt - now) / MINUTE)}m`, link.title_id);
+    // A host-wide cooldown already has its own warning; per-link detail is for debugging.
+    logEvent(
+      err.retryAfterMs >= HOST_COOLDOWN_MIN_MS ? "debug" : "info",
+      `Rate limited by ${link.host}, retrying in ${Math.ceil((retryAt - now) / MINUTE)}m (${message})`,
+      link.title_id,
+      "host",
+    );
     return;
   }
 
   if (err instanceof UnsupportedHostError) {
     // Sources often list hosts Riparr can't download from yet; set those aside quietly.
     setLinkStatus(link.id, "ignored", { error: `Riparr can't download from ${link.host} yet`, attempts });
+    logDebug("download", `Set aside ${link.url}: Riparr can't download from ${link.host}`, link.title_id);
     linkSettled(link.title_id);
     return;
   }
@@ -430,21 +493,27 @@ function handleFailure(link: Link, attempts: number, err: unknown, signal: Abort
     // Resume soon from the partial; after repeated stalls mirror selection prefers another host's copy.
     setLinkStatus(link.id, "queued", { error: `Stalled: ${message}`, attempts: next, retryAt: clock.now() + STALL_RETRY_MS });
     parkLinkFiles(link.id);
-    logEvent("warn", `Download stalled on ${link.host} (${message}), resuming shortly: ${link.url}`, link.title_id);
+    logEvent("warn", `Download stalled on ${link.host} (${message}), resuming shortly: ${link.url}`, link.title_id, "download");
     return;
   }
   if (err instanceof NeedsAttentionError || next >= MAX_ATTEMPTS) {
     setLinkStatus(link.id, "failed", { error: message, attempts: next });
     failLinkFiles(link.id, message);
-    logEvent("error", `Failed: ${link.url} (${message})`, link.title_id);
+    logEvent("error", `Failed: ${link.url} (${message})`, link.title_id, "download", { kind: "download_failed", data: { host: link.host, url: link.url } });
     const title = getTitle(link.title_id);
     void notify({ event: "download_failed", message: `${link.url}: ${message}`, subject: title && { id: title.id, name: title.name } });
     linkSettled(link.title_id);
     return;
   }
-  setLinkStatus(link.id, "queued", { error: message, attempts: next, retryAt: clock.now() + retryDelay(next) });
+  const delay = retryDelay(next);
+  setLinkStatus(link.id, "queued", { error: message, attempts: next, retryAt: clock.now() + delay });
   parkLinkFiles(link.id);
-  logEvent("warn", `Attempt ${next}/${MAX_ATTEMPTS} failed for ${link.url}: ${message}`, link.title_id);
+  logEvent("warn", `Attempt ${next}/${MAX_ATTEMPTS} failed for ${link.url}: ${message}; next try in ${Math.ceil(delay / MINUTE)}m`, link.title_id, "download");
+  if (err instanceof Error && err.stack) logDebug("download", () => `Stack for ${link.url}: ${err.stack}`, link.title_id);
+}
+
+function formatSize(bytes: number) {
+  return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 }
 
 function errorMessage(err: unknown) {

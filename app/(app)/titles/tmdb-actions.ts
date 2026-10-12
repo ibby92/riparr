@@ -4,6 +4,7 @@ import { requireSession } from "@/lib/session";
 import { NeedsAttentionError, RateLimitError } from "@/lib/errors";
 import { fetchFor } from "@/lib/net";
 import { getSettings } from "@/lib/settings";
+import { logDebug, logEvent } from "@/lib/events";
 import { createTmdbClient, matchTitleFromRelease, posterUrl, TmdbNotFoundError } from "@/lib/tmdb";
 import { findTitleByTmdb } from "@/lib/titles";
 import type { TmdbHit, TmdbDetails, ReleaseHint } from "./_add/types";
@@ -33,7 +34,9 @@ export async function searchTmdb(query: string, type: "show" | "movie" | "all", 
   if (!tmdb) return { results: [], error: "Add a TMDB API key to search.", needsKey: true };
   const yr = Number.isInteger(year) && year! >= 1870 && year! <= 2200 ? year : undefined;
   try {
+    const started = Date.now();
     const results = await tmdb.search(q, { type: type === "all" ? undefined : type, year: yr });
+    logDebug("tmdb", `Search "${q}" (${type}${yr ? `, ${yr}` : ""}): ${results.length} result(s) in ${Date.now() - started} ms`);
     return {
       results: results.slice(0, 20).map((r) => {
         const existing = findTitleByTmdb(r.type, r.tmdbId);
@@ -51,6 +54,7 @@ export async function searchTmdb(query: string, type: "show" | "movie" | "all", 
       }),
     };
   } catch (err) {
+    logEvent("warn", `TMDB search for "${q}" failed: ${err instanceof Error ? err.message : String(err)}`, null, "tmdb");
     return { results: [], ...describe(err) };
   }
 }
@@ -76,6 +80,7 @@ export async function tmdbDetails(type: "show" | "movie", tmdbId: number): Promi
     const runtime = m.runtime ? `${Math.floor(m.runtime / 60)}h ${m.runtime % 60}m` : "";
     return { details: { summary: ["Movie", runtime, m.status].filter(Boolean).join(" · "), totalEpisodes: null } };
   } catch (err) {
+    logEvent("warn", `TMDB details for ${type} ${tmdbId} failed: ${err instanceof Error ? err.message : String(err)}`, null, "tmdb");
     return describe(err);
   }
 }

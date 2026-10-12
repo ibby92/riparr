@@ -1,4 +1,5 @@
 import { connection, type NextRequest } from "next/server";
+import { logDebug, logEvent } from "./events";
 import { z } from "zod";
 import { authMode, SESSION_COOKIE, verifyApiKey, verifySessionToken } from "./auth";
 import { listRootFolders } from "./root-folders";
@@ -29,19 +30,25 @@ export function api<C>(handler: Handler<C>) {
       authMode() === "none" ||
       verifyApiKey(req.headers.get("x-api-key") ?? req.nextUrl.searchParams.get("apikey")) ||
       verifySessionToken(req.cookies.get(SESSION_COOKIE)?.value) !== null;
-    if (!authed) return Response.json({ error: "Unauthorized" }, { status: 401 });
+    if (!authed) {
+      logDebug("web", `API ${req.method} ${req.nextUrl.pathname} refused: not signed in and no valid API key`);
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     try {
       const result = await handler(req, ctx);
       return result instanceof Response ? result : Response.json(result ?? { ok: true });
     } catch (err) {
       if (err instanceof ApiError) {
+        if (err.status >= 500) logEvent("error", `API ${req.method} ${req.nextUrl.pathname}: ${err.message}`, null, "web");
+        else logDebug("web", `API ${req.method} ${req.nextUrl.pathname} → ${err.status} ${err.message}`);
         return Response.json({ error: err.message, details: err.details }, { status: err.status });
       }
       if (err instanceof z.ZodError) {
         return Response.json({ error: "Invalid request", details: z.flattenError(err).fieldErrors }, { status: 400 });
       }
-      console.error("[riparr] api error", err);
+      logEvent("error", `API ${req.method} ${req.nextUrl.pathname} failed: ${err instanceof Error ? err.message : String(err)}`, null, "web");
+      if (err instanceof Error && err.stack) logDebug("web", `Stack: ${err.stack}`);
       return Response.json({ error: "Internal error" }, { status: 500 });
     }
   };

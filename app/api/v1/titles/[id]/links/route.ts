@@ -15,6 +15,6 @@ export const POST = api(async (req, ctx: RouteContext<"/api/v1/titles/[id]/links
   if (!title) throw new ApiError(404, "Title not found");
   const { urls, archive_password } = body.parse(await jsonBody(req));
   const added = addLinks(title.id, null, urls, archive_password || null);
-  logEvent("info", `API: added ${added} of ${urls.length} link(s)`, title.id);
+  logEvent("info", `API: added ${added} of ${urls.length} link(s)`, title.id, "web", { kind: "links_added", data: { count: added, via: "the API" } });
   return Response.json({ received: urls.length, added }, { status: 201 });
 });

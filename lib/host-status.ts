@@ -1,6 +1,6 @@
 import { all, one, run } from "./db";
 import type { RateLimitError } from "./errors";
-import { logEvent } from "./events";
+import { logDebug, logEvent } from "./events";
 import { KNOWN_HOSTS } from "./host-ids";
 import { notify } from "./notify";
 
@@ -117,11 +117,16 @@ export function recordHostLimit(host: string, until: number, reason: string, now
     continuing ? (row!.limit_notified_at ?? null) : null,
   );
   holdHostLinks(host, newUntil);
+  logDebug(
+    "host",
+    () => `${hostLabel(host)} ${fresh ? "limited" : continuing ? "limit extended" : "limited again"} until ${new Date(newUntil).toISOString()} (${reason})`,
+  );
   return { until: newUntil, fresh };
 }
 
 /** A request to the host worked. Once its reset time has passed, that ends the cooldown. */
 export function recordHostOk(host: string, now = clock.now()) {
+  const before = statusRow(host);
   run(
     `INSERT INTO host_status (host, last_ok_at) VALUES (?1, ?2)
      ON CONFLICT (host) DO UPDATE SET last_ok_at = ?2,
@@ -132,10 +137,14 @@ export function recordHostOk(host: string, now = clock.now()) {
     host,
     now,
   );
+  if (before?.limited_until != null && before.limited_until <= now) {
+    logEvent("info", `${hostLabel(host)} limit has ended; its downloads resume`, null, "host", { kind: "host_limit_ended", data: { host } });
+  }
 }
 
 /** A request failed for a reason other than a limit or a missing file (stalls, server errors, captchas). */
 export function recordHostError(host: string, message: string, now = clock.now()) {
+  logDebug("host", `${hostLabel(host)} error: ${message}`);
   run(
     `INSERT INTO host_status (host, last_error_at, last_error) VALUES (?1, ?2, ?3)
      ON CONFLICT (host) DO UPDATE SET last_error_at = ?2, last_error = ?3`,
@@ -149,6 +158,10 @@ export function recordHostError(host: string, message: string, now = clock.now()
 export function clearHostLimit(host: string) {
   const row = statusRow(host);
   if (row?.limited_until == null) return;
+  logEvent("info", `${hostLabel(host)} limit cleared by hand (it was set until ${new Date(row.limited_until).toISOString()}); retrying its downloads`, null, "host", {
+    kind: "host_limit_ended",
+    data: { host },
+  });
   run(
     "UPDATE links SET retry_at = NULL, updated_at = ? WHERE host = ? AND status = 'queued' AND retry_at IS NOT NULL AND retry_at <= ?",
     Date.now(),
@@ -235,7 +248,7 @@ export function notifyLongLimits(now = clock.now()): string[] {
     const hours = Math.floor((now - r.limited_since!) / HOUR);
     const resumes = new Date(r.limited_until!).toISOString().replace("T", " ").slice(0, 16);
     const message = `${hostLabel(r.host)} has been limited for ${hours}h (${r.limit_reason}); ${waiting} download(s) waiting, next try ${resumes} UTC`;
-    logEvent("warn", message);
+    logEvent("warn", message, null, "host", { kind: "host_limited", data: { host: r.host, until: r.limited_until! } });
     void notify({ event: "needs_attention", message });
   }
   return rows.map((r) => r.host);
