@@ -17,6 +17,3 @@ services:
     ports:
       - "7676:7676" # web UI
       - "9666:9666" # Click'n'Load listener
-    # FlareSolverr and a VPN proxy (e.g. gluetun's HTTPPROXY) are set by URL in
-    # Settings → Connections. Their hostnames only resolve if Riparr shares their
-    # Docker network; see docker-compose.existing-gluetun.yml for an example.

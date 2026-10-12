@@ -49,6 +49,15 @@ docker compose up -d
 
 Open `http://<host>:7676`. The first visit asks you to create the login. (Port 7878 is Radarr's, so Riparr uses 7676.)
 
+To keep machine-specific bits (your media path, extra networks) out of `docker-compose.yml`, put them in a `docker-compose.override.yml` next to it. Docker Compose merges it in automatically, and it's git-ignored. For example:
+
+```yaml
+services:
+  riparr:
+    volumes:
+      - /mnt/storage/Videos:/media
+```
+
 ## Volumes
 
 | Path | Contents |
@@ -73,11 +82,15 @@ Files land at `<root folder>/<title folder>/Season 01/<file>`, where Plex and Je
 
 Riparr doesn't start its own VPN or FlareSolverr. You enter their URLs in **Settings → Connections**. One thing to get right is Docker networking: inside Riparr's container, `127.0.0.1` is Riparr itself, not the host. So either:
 
-- **Join their network (recommended).** Then use their container names, e.g. `http://gluetun:8888` and `http://flaresolverr:8191`. For a gluetun on a network called `vpn_proxy`:
-  ```sh
-  docker compose -f docker-compose.yml -f docker-compose.existing-gluetun.yml up -d
+- **Join their network (recommended).** Then use their container names, e.g. `http://gluetun:8888` and `http://flaresolverr:8191`. For a gluetun on a network called `vpn_proxy`, add to Riparr's service in `docker-compose.yml`:
+  ```yaml
+      networks: [default, vpn_proxy]
+  # …and at the top level:
+  networks:
+    vpn_proxy:
+      external: true
   ```
-  Set `GLUETUN_NETWORK` if your network has another name. The override also sets `RIPARR_PROXY_URL=http://gluetun:8888`.
+  Optionally set `RIPARR_PROXY_URL=http://gluetun:8888` under `environment:` instead of entering the proxy in Settings.
 - **Or use the host's address** where those services publish their ports, e.g. `http://192.168.1.10:8888`.
 
 gluetun needs `HTTPPROXY=on` for its proxy. **Test proxy** shows the exit IP, so you can confirm requests leave through the VPN.

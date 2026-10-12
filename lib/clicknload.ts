@@ -17,6 +17,9 @@ export function normalizePageUrl(url: string): string | null {
   try {
     const u = new URL(url.trim());
     if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    // filecrypt: one container, many spellings (mirror domains, www, .html, query strings).
+    const fc = /(^|\.)filecrypt\.(cc|co|to|org)$/i.test(u.hostname) && /^\/Container\/([A-Za-z0-9]+)/i.exec(u.pathname);
+    if (fc) return `https://filecrypt.cc/Container/${fc[1].toUpperCase()}`;
     u.hostname = u.hostname.toLowerCase().replace(/^www\./, "");
     u.hash = "";
     return u.toString().replace(/\/+$/, "");

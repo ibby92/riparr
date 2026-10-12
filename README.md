@@ -3,7 +3,7 @@
 Hands-off downloads for your *arr stack. Add a show or movie, give it the page (a link protector or paste page) that lists its file-host links, and Riparr keeps watching it: when new episodes appear, it downloads them from your preferred host, verifies them, extracts archives and files them in your library like Sonarr and Radarr do.
 
 - **Library:** shows and movies matched on TMDB, with posters, in *arr-style root folders (`/media/Kdrama/Doctor X/Season 01/…`); season folders optional per show
-- **Sources:** several pages per title. mkvdrama-style encrypted lists, viewcrate-style DLC exports, Click'n'Load pages, `.dlc` files, plain paste pages, and links pushed from your browser's Click'n'Load button
+- **Sources:** several pages per title. mkvdrama-style encrypted lists, viewcrate-style DLC exports, filecrypt and other Click'n'Load pages, `.dlc` files, plain paste pages, and links pushed from your browser's Click'n'Load button (captcha-protected containers such as gated filecrypt ones go this way)
 - **Hosts:** gofile, pixeldrain and MEGA, including folders and passwords, with optional accounts
 - **Preferred hosts:** each file is downloaded once, from your favourite host that has it; other mirrors are kept as fallbacks
 - **Downloads:** resume after restarts and stalls, host-wide cooldowns for transfer limits, size and checksum checks, per-host limits, speed limit, free-space guard per root folder

@@ -206,7 +206,7 @@ Most of the mechanics exist already: rate limits set a `retry_at`, and partial f
   - **Proxy URL**, e.g. `http://gluetun:8888`.
   - **Networking:** a service's hostname only resolves when Riparr shares its Docker network. Otherwise use the host address. `127.0.0.1` inside Riparr's container isn't the host.
   - Settings → Connections tests each URL.
-  - The current `docker-compose.vpn.yml` (starts its own gluetun) is no longer the main path. It may be removed, or kept as an example.
+  - The bundled `docker-compose.vpn.yml` and `docker-compose.existing-gluetun.yml` overrides were removed in v1.2: join your existing network in `docker-compose.yml` instead.
 - **First-run wizard:** login, then root folders, connections (proxy, FlareSolverr) and preferred hosts, then add your first title.
 - **Docs updated** for titles, sources, root folders and the new UI.
 - **Shakedown:** deploy on the server and track 2–3 real titles for a week. Watch real downloads, host cooldowns, archive extraction, a new episode arriving, and an upgrade to the next version with data intact.

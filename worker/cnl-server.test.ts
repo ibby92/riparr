@@ -86,6 +86,20 @@ describe("Click'n'Load listener", () => {
     ]);
   });
 
+  it("files links from a filecrypt container under its source, whatever spelling the browser sends", async () => {
+    const kdrama = addRootFolder(path.join(media, "Kdrama"));
+    const id = createTitle(
+      titleInput.parse({ type: "show", name: "Filecrypt Show", root_folder_id: kdrama, folder: "Filecrypt Show", monitored: true }),
+    );
+    createSource(id, sourceInput.parse({ url: "https://www.filecrypt.cc/Container/2B9C3624AD.html", poll: false }));
+    const res = await post("/flash/addcrypted2", {
+      ...encrypt(["https://gofile.io/d/fc1"]),
+      source: "https://filecrypt.co/Container/2b9c3624ad.html",
+    });
+    expect(res.status).toBe(200);
+    expect(listLinks(id).map((l) => l.url)).toEqual(["https://gofile.io/d/fc1"]);
+  });
+
   it("creates a show with a non-polled source in the default show root for pages it doesn't know", async () => {
     const tv = addRootFolder(path.join(media, "TV"));
     saveSettings({ defaultShowRootId: tv, defaultSeasonFolders: false });
@@ -125,6 +139,8 @@ describe("normalizePageUrl", () => {
   it.each([
     ["https://WWW.Example.com/a/b/", "https://example.com/a/b"],
     ["https://example.com/a?id=1#x", "https://example.com/a?id=1"],
+    ["https://www.filecrypt.cc/Container/2B9C3624AD.html", "https://filecrypt.cc/Container/2B9C3624AD"],
+    ["http://filecrypt.co/Container/2b9c3624ad.html?mirror=2", "https://filecrypt.cc/Container/2B9C3624AD"],
     ["ftp://example.com/", null],
     ["not a url", null],
   ])("%s -> %s", (input, expected) => {

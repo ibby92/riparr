@@ -140,6 +140,11 @@ Riparr reads a page in this order and uses the first approach that finds links:
 
 If a site answers "too many requests", Riparr waits as long as the site asks before checking again. This doesn't count as an error. A page that returns 404 or 410 is gone: the source needs attention until you replace or remove it.
 
+**filecrypt** containers (`filecrypt.cc/Container/…`, also its mirror domains) can be sources:
+
+- **Without a captcha**, Riparr reads the container's Click'n'Load buttons on every check, like any other page.
+- **With a captcha** (a "Security Check — confirm you're not a robot" page), Riparr can't read it by itself, and doesn't try to get around the check. The source needs attention with a message saying so. Turn off **Check the page for new links** on the source, then when you want new episodes: open the container in your browser, pass the check and click **Click'n'Load**. The links are filed under the title that has this container as a source, whichever filecrypt domain or spelling of the address your browser uses. Downloading the container's `.dlc` and importing it on the title page works too.
+
 Some sites hand out **temporary links**: mkvdrama's `/c/…` download pages expire after about a day, and a new one is only issued on the show's page, behind a check meant for people. When a link has expired, the source needs attention with "This link has expired on the site". Open the show's page in your browser, copy the new download-page link and paste it with **Replace URL**. The source keeps its links and history, and is checked again right away.
 
 Links on hosts Riparr can't download from (e.g. send.now, vikingfile, fileditch) are listed as *ignored* with "Riparr can't download from … yet". They aren't failures and don't trigger notifications.

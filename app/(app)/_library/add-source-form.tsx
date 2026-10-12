@@ -1,19 +1,22 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
+import { siteHint } from "@/lib/site-hints";
 import { Plus } from "lucide-react";
 import { addSource, type SourceFormState } from "../titles/actions";
 
 /** Adds a container page to a title (restyled version of the old inline form). */
 export function AddSourceForm({ titleId }: { titleId: number }) {
   const [state, action, pending] = useActionState<SourceFormState, FormData>(addSource, {});
+  const [url, setUrl] = useState("");
   return (
     <form action={action} className="space-y-3">
       <input type="hidden" name="title_id" value={titleId} />
       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_10rem_7rem]">
         <label className="block space-y-1.5">
           <span className="block text-[13px] font-medium text-fg-2">Source page</span>
-          <input name="url" type="url" className="input input-mono" placeholder="https://mkvdrama.net/c/…" required />
+          <input name="url" type="url" className="input input-mono" placeholder="https://viewcrate.cc/c/…" required value={url} onChange={(e) => setUrl(e.target.value)} />
+          {siteHint(url) && <span className="block text-xs text-muted">{siteHint(url)}</span>}
         </label>
         <label className="block space-y-1.5">
           <span className="block text-[13px] font-medium text-fg-2">Password</span>

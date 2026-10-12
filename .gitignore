@@ -48,3 +48,6 @@ next-env.d.ts
 
 # development
 references/
+
+# local compose overrides (machine-specific paths, networks)
+docker-compose.override.yml

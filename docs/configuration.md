@@ -21,13 +21,7 @@ Most configuration lives in the web UI (**Settings**) and is stored in the datab
 
 Your media lives wherever you mount it, e.g. `/path/to/Videos:/media`. Riparr doesn't assume a path; you add root folders under it in **Settings → Media Management**.
 
-For the gluetun compose overrides (`.env`):
-
-| Variable | Used by | Purpose |
-| --- | --- | --- |
-| `NORDVPN_USER`, `NORDVPN_PASSWORD` | `docker-compose.vpn.yml` | NordVPN service credentials |
-| `NORDVPN_COUNTRY` | `docker-compose.vpn.yml` | VPN server country (default `Canada`) |
-| `GLUETUN_NETWORK` | `docker-compose.existing-gluetun.yml` | Docker network of your existing gluetun (default `vpn_proxy`) |
+Riparr doesn't start a VPN itself; point it at your existing proxy (see [installation](installation.md#using-your-existing-gluetun-and-flaresolverr)).
 
 ## Settings
 

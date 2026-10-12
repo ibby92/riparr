@@ -1,5 +1,6 @@
 "use client";
 
+import { siteHint } from "@/lib/site-hints";
 import { useId } from "react";
 import { Plus, X } from "lucide-react";
 import { Errors, Switch } from "./bits";
@@ -67,6 +68,7 @@ export function SourcesFields({
                   autoComplete="off"
                 />
                 <Errors id={`${id}-err-${i}`} errors={err} />
+                {siteHint(r.url) && <p className="mt-1 text-xs text-muted">{siteHint(r.url)}</p>}
               </div>
               <button
                 type="button"

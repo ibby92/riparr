@@ -44,7 +44,12 @@ const CHALLENGE =
 const CAPTCHA =
   /class=["'][^"']*\b(?:g-recaptcha|h-captcha|cf-turnstile|frc-captcha)\b|google\.com\/recaptcha\/|hcaptcha\.com\/1\/api\.js|challenges\.cloudflare\.com\/turnstile|<input[^>]+name=["']?(?:captcha|captcha_code|recaptcha_response_field)\b|id=["']captcha/i;
 const WRONG_PASSWORD = /(?:wrong|incorrect|invalid|falsches)\s+(?:password|passwort|pass)/i;
+/** Proof-of-work and other "confirm you're human" gates (filecrypt's cutcaptcha) that only a person should pass. */
+const HUMAN_CHECK = /class=["'][^"']*\bpow-captcha\b|cutcaptcha\.net|<h2>\s*Security Check\s*<\/h2>/i;
+const FILECRYPT_MSG =
+  "filecrypt asks for a captcha before it shows this container's links, and Riparr doesn't solve captchas. Open the page in your browser, pass the check, then click Click'n'Load (or download its .dlc and import it on the title). Turn off “Check the page for new links” on this source so Riparr stops trying.";
 const PASSWORD_INPUT = /<input\b[^>]*\btype\s*=\s*["']?password\b/i;
+const CAPTCHA_MSG = "Captcha required — solve it in a browser and use Click'n'Load";
 const CHALLENGE_MSG =
   "Blocked by an anti-bot challenge (Cloudflare/DDoS-Guard) — configure FlareSolverr in Settings, or open the container in a browser";
 const FS_CHALLENGE_MSG =
@@ -68,14 +73,30 @@ export function findDlcUrls(html: string, baseUrl: string): string[] {
 }
 
 /** Human-readable reason the page needs a person, or null. */
-export function detectAttention(html: string, password: string | null): string | null {
+/** The page without HTML comments: commented-out forms (filecrypt keeps an old password field) aren't real. */
+function visible(html: string) {
+  return html.replace(/<!--[\s\S]*?-->/g, "");
+}
+
+export function detectAttention(html: string, password: string | null, url = ""): string | null {
   if (CHALLENGE.test(html)) return CHALLENGE_MSG;
-  if (CAPTCHA.test(html)) return "Captcha required — solve it in a browser and use Click'n'Load";
-  if (PASSWORD_INPUT.test(html)) {
+  const shown = visible(html);
+  if (HUMAN_CHECK.test(shown)) return isFilecrypt(url) || /filecrypt/i.test(shown) ? FILECRYPT_MSG : CAPTCHA_MSG;
+  if (CAPTCHA.test(shown)) return CAPTCHA_MSG;
+  if (PASSWORD_INPUT.test(shown)) {
     if (!password) return "Container is password-protected — set its password";
     return "Container rejected the password";
   }
   return null;
+}
+
+/** filecrypt.cc and its mirror domains. */
+export function isFilecrypt(url: string): boolean {
+  try {
+    return /(^|\.)filecrypt\.(cc|co|to|org)$/i.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
 }
 
 /** An anti-bot challenge (not a captcha) — the kind FlareSolverr can get past. */
@@ -342,7 +363,7 @@ async function runSources(page: Page, opts: CrawlOptions): Promise<{ result: Cra
 
 /** Password form, sources and attention checks on an already-fetched page. */
 async function crawlPage(page: Page, opts: CrawlOptions, endpoint: string | null): Promise<CrawlResult> {
-  if (opts.password && PASSWORD_INPUT.test(page.html)) {
+  if (opts.password && PASSWORD_INPUT.test(visible(page.html))) {
     opts.log?.("Page asks for a password; submitting the source's password");
     const submitted = await submitPassword(page, opts.password, opts, endpoint);
     if (submitted) {
@@ -367,7 +388,7 @@ async function crawlPage(page: Page, opts: CrawlOptions, endpoint: string | null
   }
   if (dlcError) opts.log?.(`DLC failed: ${dlcError}`);
 
-  const attention = detectAttention(page.html, opts.password);
+  const attention = detectAttention(page.html, opts.password, page.url);
   if (attention) {
     if (attention === CHALLENGE_MSG) throw new ChallengeError(page.via === "flaresolverr" ? FS_CHALLENGE_MSG : CHALLENGE_MSG);
     throw new NeedsAttentionError(attention);

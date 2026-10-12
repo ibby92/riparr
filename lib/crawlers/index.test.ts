@@ -320,3 +320,43 @@ describe("removed source pages", () => {
     expect(err.message).toMatch(/link has expired.*Replace URL/);
   });
 });
+
+describe("filecrypt", () => {
+  const KEY = "31323334353637383930616263646566";
+  const LINKS = ["https://gofile.io/d/AbC123", "https://pixeldrain.com/u/xyz789"];
+  const encrypt = (links: string[]) => {
+    const plain = Buffer.from(links.join("\r\n"));
+    const padded = Buffer.concat([plain, Buffer.alloc((16 - (plain.length % 16)) % 16)]);
+    const c = createCipheriv("aes-128-cbc", Buffer.from(KEY, "hex"), Buffer.from(KEY, "hex")).setAutoPadding(false);
+    return Buffer.concat([c.update(padded), c.final()]).toString("base64");
+  };
+  const crawl = (page: string) =>
+    crawlContainer("https://www.filecrypt.cc/Container/2B9C3624AD.html", {
+      password: null,
+      signal: new AbortController().signal,
+      fetch: (async () => new Response(page, { status: 200, headers: { "content-type": "text/html" } })) as unknown as typeof fetch,
+    });
+
+  // Shaped like filecrypt's gate: a proof-of-work captcha, and an old password field left in a comment.
+  const GATED = `<title>Filecrypt</title><form action="" method="post" id="cform"><div class="window protection">
+    <h2>Security Check</h2><p>To continue, please confirm you're not a robot.</p>
+    <link rel="preload" as="fetch" href="https://v3.cutcaptcha.net/">
+    <div class="pow-captcha" id="pow-captcha" data-session="/captchasession/5785237EB8.json"></div>
+    <!-- <input type="password" name="password" id="p4assw0rt" placeholder="Enter Password"> --></div></form>`;
+
+  it("explains the captcha gate instead of calling the container password-protected", async () => {
+    const err = await crawl(GATED).catch((e) => e);
+    expect(err).toBeInstanceOf(NeedsAttentionError);
+    expect(err.message).toMatch(/^filecrypt asks for a captcha .*Click'n'Load.*Turn off/);
+  });
+
+  it("reads an ungated container through its Click'n'Load buttons", async () => {
+    const page = `<title>Filecrypt</title><table><tr><td><button onclick="CNLPOP('cnl1', '${KEY}', '${encrypt(LINKS)}', '');return false;">CNL</button></td></tr></table>`;
+    await expect(crawl(page)).resolves.toMatchObject({ source: "cnl2", links: LINKS });
+  });
+
+  it("ignores password fields that are commented out", async () => {
+    const err = await crawl(`<p>nothing here</p><!-- <input type="password" name="password"> -->`).catch((e) => e);
+    expect(err).not.toBeInstanceOf(Error);
+  });
+});

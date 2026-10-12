@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { Pencil, RefreshCw, Trash2 } from "lucide-react";
+import { siteHint } from "@/lib/site-hints";
 import { checkSourceNow, editSource, removeSource, toggleSource, type SourceFormState } from "../titles/actions";
 
 export type SourceEditable = {
@@ -33,6 +34,7 @@ export function SourceActions({
   label: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [url, setUrl] = useState(s.url);
   const [state, action, pending] = useActionState<SourceFormState, FormData>(async (prev, formData) => {
     const result = await editSource(prev, formData);
     // Close after a successful save; the page refreshes with the new values.
@@ -82,7 +84,8 @@ export function SourceActions({
               name="url"
               type="url"
               required
-              defaultValue={s.url}
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
               className="input input-mono"
               autoFocus={needsAttention}
               onFocus={(e) => needsAttention && e.currentTarget.select()}
@@ -90,6 +93,7 @@ export function SourceActions({
             {needsAttention && (
               <span className="block text-xs text-muted">Paste the page&apos;s current address. Links found so far and the title&apos;s history stay.</span>
             )}
+            {siteHint(url) && <span className="block text-xs text-muted">{siteHint(url)}</span>}
           </label>
           <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem]">
             <label className="block space-y-1.5">

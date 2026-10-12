@@ -18,6 +18,10 @@ The site served a Cloudflare or DDoS-Guard challenge page instead of the source 
 - Set up [FlareSolverr](user-guide.md#flaresolverr) and Riparr will retry through it.
 - If you see **"Still blocked … after going through FlareSolverr"**, the challenge needs a person. Open the page in your browser and send the links with [Click'n'Load](user-guide.md#clicknload).
 
+### "filecrypt asks for a captcha before it shows this container's links…"
+
+The container's owner turned on filecrypt's captcha, so the links only appear after a person passes it. Turn off **Check the page for new links** on the source, then send the links from your browser: open the container, pass the check, click **Click'n'Load** (Riparr files them under this title), or import the container's `.dlc` on the title page. See [filecrypt](user-guide.md#sources-and-how-polling-works).
+
 ### "Captcha required — solve it in a browser and use Click'n'Load"
 
 The page shows a real captcha (reCAPTCHA, hCaptcha, Turnstile), which neither Riparr nor FlareSolverr can solve.
