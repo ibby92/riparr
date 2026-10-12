@@ -20,7 +20,16 @@ const SCOPES = [
   { value: "all", label: "Everything", hint: "Container sites and file hosts (MEGA excepted)" },
 ] as const;
 
-export function ConnectionsForm({ settings, envProxy }: { settings: ConnectionSettings; envProxy: boolean }) {
+export function ConnectionsForm({
+  settings,
+  envProxy,
+  warnings,
+}: {
+  settings: ConnectionSettings;
+  envProxy: boolean;
+  /** Server-side warnings per field, e.g. 127.0.0.1 inside Docker. */
+  warnings?: { proxyUrl: string | null; flaresolverrUrl: string | null };
+}) {
   const form = useSettingsForm(saveConnectionSettings);
   const { errors } = form;
   const scope = form.text("proxyScope", settings.proxyScope);
@@ -79,6 +88,7 @@ export function ConnectionsForm({ settings, envProxy }: { settings: ConnectionSe
                 spellCheck={false}
               />
             </Field>
+            {warnings?.proxyUrl && <p className="-mt-2 text-xs text-warn">{warnings.proxyUrl}</p>}
             <fieldset className="m-0 border-0 p-0">
               <legend className="mb-1.5 text-[13px] font-medium text-fg-2">Use the proxy for</legend>
               <div className="grid gap-2 sm:grid-cols-2">
@@ -110,6 +120,7 @@ export function ConnectionsForm({ settings, envProxy }: { settings: ConnectionSe
                 spellCheck={false}
               />
             </Field>
+            {warnings?.flaresolverrUrl && <p className="-mt-2 text-xs text-warn">{warnings.flaresolverrUrl}</p>}
             <TestButton run={checkFlareSolverr} />
           </Section>
         </SettingsCard>

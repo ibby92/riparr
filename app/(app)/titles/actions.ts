@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { z } from "zod";
 import { requireSession } from "@/lib/session";
-import { configDir, getDb } from "@/lib/db";
+import { configDir, getDb, run } from "@/lib/db";
 import { cachePoster, removePosters } from "@/lib/media-cover";
 import { fetchFor } from "@/lib/net";
 import { getSettings } from "@/lib/settings";
@@ -228,6 +228,8 @@ export async function editTitle(_prev: FormState, formData: FormData): Promise<F
     after(() => removePosters(old.tmdbId, old.type, configDir()).catch(() => {}));
   }
   if (input.tmdb_id && !sameMatch) cachePosterLater(input.type, input.tmdb_id, input.poster_path, true);
+  // A new match has another schedule: the worker reads it on its next pass.
+  if (!sameMatch) run("UPDATE titles SET schedule_synced_at = NULL WHERE id = ?", id);
   redirect(`/titles/${id}`);
 }
 

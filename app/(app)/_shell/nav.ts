@@ -27,6 +27,7 @@ export const NAV: NavEntry[] = [
     items: [
       { href: "/shows", label: "Shows", badge: "attention" },
       { href: "/movies", label: "Movies" },
+      { href: "/calendar", label: "Calendar" },
     ],
   },
   {

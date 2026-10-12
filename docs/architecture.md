@@ -178,6 +178,7 @@ A source is `pending` → `ok` | `needs_attention` | `error`. A title's status r
 | `extractions` | One row per archive set (absolute `entry_path`): result and error |
 | `host_status` | Per-host cooldown (`limited_until`, reason) and last success/error |
 | `host_usage` | Bytes per host per UTC day, for the dashboard chart and the sidebar |
+| `episodes` | Each matched show's episodes and air dates from TMDB, refreshed twice a day by `lib/schedule.ts` (movies keep `titles.release_date`); the Calendar joins them with files and folder scans for each episode's state |
 | `disk_files` | Video files found in each title's folder by the last scan (`titles.disk_scanned_at`) |
 | `settings` | Key/value JSON: app settings, auth (password hash, session secret, credential version), API key, worker heartbeat, disk status |
 | `host_accounts` | Per-host credentials as JSON |

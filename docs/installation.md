@@ -91,7 +91,7 @@ Riparr doesn't start its own VPN or FlareSolverr. You enter their URLs in **Sett
       external: true
   ```
   Optionally set `RIPARR_PROXY_URL=http://gluetun:8888` under `environment:` instead of entering the proxy in Settings.
-- **Or use the host's address** where those services publish their ports, e.g. `http://192.168.1.10:8888`.
+- **Or use the host's address** where those services publish their ports, e.g. `http://192.168.1.10:8888`, as you would in Sonarr or Radarr. The port has to be published on that address: a mapping like `127.0.0.1:8888:8888` (common for gluetun's proxy) only listens on the host's loopback, which other containers can't reach. Publish it as `8888:8888` instead, and consider gluetun's `HTTPPROXY_USER`/`HTTPPROXY_PASSWORD` since the proxy is then open to your LAN.
 
 gluetun needs `HTTPPROXY=on` for its proxy. **Test proxy** shows the exit IP, so you can confirm requests leave through the VPN.
 

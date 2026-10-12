@@ -14,7 +14,7 @@ import { credentialsInput } from "@/lib/credentials";
 import { requireSession, startSession } from "@/lib/session";
 import { ACCOUNT_FIELDS, listHostAccounts, saveHostAccount } from "@/lib/host-accounts";
 import { testFlareSolverr } from "@/lib/crawlers";
-import { maskProxyUrl, proxiedFetch, proxyUrlError, proxyUrlSetting, publicIp, unmaskProxyUrl } from "@/lib/net";
+import { describeNetworkError, maskProxyUrl, proxiedFetch, proxyUrlError, proxyUrlSetting, publicIp, unmaskProxyUrl } from "@/lib/net";
 import { notify } from "@/lib/notify";
 import { addRootFolder, getRootFolder, normalizeRootPath, removeRootFolder, rootFolderError } from "@/lib/root-folders";
 import { clearTmdbCache, createTmdbClient } from "@/lib/tmdb";
@@ -250,8 +250,7 @@ export async function checkProxy(): Promise<TestState> {
     }
     return { ok: true, result: `Working: exits as ${viaProxy} (direct: ${direct})` };
   } catch (err) {
-    const message = err instanceof Error ? (err.cause instanceof Error ? err.cause.message : err.message) : String(err);
-    return { ok: false, result: `Proxy failed: ${message}` };
+    return { ok: false, result: `Proxy failed: ${describeNetworkError(err, url)}` };
   }
 }
 

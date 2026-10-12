@@ -440,6 +440,20 @@ export const MIGRATIONS: Migration[] = [
   `
     ALTER TABLE titles ADD COLUMN archived_at INTEGER;
   `,
+  // Calendar: each show's episodes and air dates from TMDB, and a movie's release date (lib/schedule.ts).
+  `
+    CREATE TABLE episodes (
+      title_id INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
+      season   INTEGER NOT NULL,
+      episode  INTEGER NOT NULL,
+      name     TEXT,
+      air_date TEXT, -- YYYY-MM-DD as TMDB lists it; NULL when not announced
+      PRIMARY KEY (title_id, season, episode)
+    ) WITHOUT ROWID;
+    CREATE INDEX episodes_air_date ON episodes(air_date);
+    ALTER TABLE titles ADD COLUMN release_date TEXT;
+    ALTER TABLE titles ADD COLUMN schedule_synced_at INTEGER;
+  `,
 ];
 
 /** Latest schema version (number of migrations). */

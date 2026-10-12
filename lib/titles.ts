@@ -26,6 +26,10 @@ export type Title = {
   disk_scanned_at: number | null;
   /** When the title was archived (kept, but no longer checked or downloaded); null if it isn't. */
   archived_at: number | null;
+  /** A movie's release date (YYYY-MM-DD) from TMDB, for the calendar. */
+  release_date: string | null;
+  /** When lib/schedule.ts last read the title's episodes and air dates from TMDB. */
+  schedule_synced_at: number | null;
   created_at: number;
   updated_at: number;
 };

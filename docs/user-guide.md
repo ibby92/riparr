@@ -3,6 +3,7 @@
 - [Concepts](#concepts)
 - [Root folders](#root-folders)
 - [Titles](#titles)
+- [Calendar](#calendar)
 - [Sources and how polling works](#sources-and-how-polling-works)
 - [Click'n'Load](#clicknload)
 - [DLC files and adding links by hand](#dlc-files-and-adding-links-by-hand)
@@ -120,6 +121,20 @@ A title's status comes from its sources:
 | Paused | The title isn't monitored |
 
 Cards and the title page also show what's happening now: *Downloading*, or *Waiting on pixeldrain, resumes in 41m*.
+
+## Calendar
+
+**Library → Calendar** shows when your shows' episodes and your movies come out, using TMDB's schedule for every title matched on TMDB (archived titles are left out; paused ones are shown faded). Each entry is marked with what Riparr has of it:
+
+| Mark | Meaning |
+| --- | --- |
+| Downloaded | Downloaded, or already in the title's folder |
+| Downloading / On its way | Downloading now, or found on a source and queued |
+| Missing | Aired, but not on disk yet |
+| Airs today | Out today, not on disk yet |
+| Upcoming | Not out yet |
+
+Switch between **Week** (posters and episode names) and **Month**, and step with ← **Today** →. On a phone, either view becomes a day-by-day list. Days follow the time zone in Settings → General. Riparr reads each title's schedule from TMDB when it's added or re-matched, then twice a day, so new seasons and changed dates show up on their own (and the title's episode count stays current). Titles without a TMDB match aren't on the calendar; match them with **Edit**.
 
 ## Sources and how polling works
 

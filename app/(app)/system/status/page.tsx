@@ -8,7 +8,7 @@ import { configDir } from "@/lib/db";
 import { SCHEMA_VERSION } from "@/lib/db/migrations";
 import { listRootFolders } from "@/lib/root-folders";
 import { HEARTBEAT_INTERVAL_MS, getSettings, workerHeartbeatAge } from "@/lib/settings";
-import { proxyUrlSetting } from "@/lib/net";
+import { loopbackInDockerHint, proxyUrlSetting } from "@/lib/net";
 import pkg from "@/package.json";
 import { PageHeader, ProgressBar, StatusPill, formatAgo, formatBytes, formatDuration } from "../../_kit";
 import { backupRows, databaseInfo, libraryCounts } from "../_data";
@@ -152,10 +152,21 @@ async function Status() {
           <Check ok={Boolean(settings.tmdbApiKey) || null} title={settings.tmdbApiKey ? "TMDB key saved" : "No TMDB key (search and posters are off)"} />
           <Check ok={settings.cnlEnabled || null} title={settings.cnlEnabled ? "Click'n'Load listener on port 9666" : "Click'n'Load is off"} />
           <Check
-            ok={proxyUrlSetting() ? true : null}
-            title={proxyUrlSetting() ? `Proxy set (${settings.proxyScope === "all" ? "everything" : "container sites only"})` : "No proxy; connecting directly"}
+            ok={proxyUrlSetting() ? !loopbackInDockerHint(proxyUrlSetting()) : null}
+            title={
+              proxyUrlSetting()
+                ? loopbackInDockerHint(proxyUrlSetting())
+                  ? "Proxy points at 127.0.0.1, which Riparr can't reach from Docker"
+                  : `Proxy set (${settings.proxyScope === "all" ? "everything" : "container sites only"})`
+                : "No proxy; connecting directly"
+            }
+            detail={loopbackInDockerHint(proxyUrlSetting()) ?? undefined}
           />
-          <Check ok={settings.flaresolverrUrl ? true : null} title={settings.flaresolverrUrl ? "FlareSolverr set" : "No FlareSolverr"} detail={settings.flaresolverrUrl || undefined} />
+          <Check
+            ok={settings.flaresolverrUrl ? !loopbackInDockerHint(settings.flaresolverrUrl) : null}
+            title={settings.flaresolverrUrl ? (loopbackInDockerHint(settings.flaresolverrUrl) ? "FlareSolverr points at 127.0.0.1, which Riparr can't reach from Docker" : "FlareSolverr set") : "No FlareSolverr"}
+            detail={loopbackInDockerHint(settings.flaresolverrUrl) ?? (settings.flaresolverrUrl || undefined)}
+          />
           <Check
             ok={settings.notifyWebhookUrl || settings.notifyAppriseUrl ? true : null}
             title={settings.notifyWebhookUrl || settings.notifyAppriseUrl ? "Notifications set up" : "No notifications"}

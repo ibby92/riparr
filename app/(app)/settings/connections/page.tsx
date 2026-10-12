@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
 import { connection } from "next/server";
-import { maskProxyUrl } from "@/lib/net";
+import { loopbackInDockerHint, maskProxyUrl, proxyUrlSetting } from "@/lib/net";
 import { getSettings } from "@/lib/settings";
 import { ConnectionsForm } from "./connections-form";
 
@@ -29,6 +29,7 @@ async function Connections() {
         flaresolverrUrl: s.flaresolverrUrl,
       }}
       envProxy={Boolean(process.env.RIPARR_PROXY_URL)}
+      warnings={{ proxyUrl: loopbackInDockerHint(proxyUrlSetting()), flaresolverrUrl: loopbackInDockerHint(s.flaresolverrUrl) }}
     />
   );
 }

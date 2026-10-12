@@ -44,7 +44,7 @@ import {
 } from "@/lib/links";
 import { coveredByDisk, groupMirrors, mirrorNameKey, planMirrors } from "@/lib/mirrors";
 import { externalDiskFiles, scanTitle } from "@/lib/disk-scan";
-import { fetchFor } from "@/lib/net";
+import { describeNetworkError, fetchFor, proxyUrlSetting } from "@/lib/net";
 import { notify } from "@/lib/notify";
 import { parseEpisode } from "@/lib/episodes";
 import { resolveInside } from "@/lib/paths";
@@ -518,5 +518,6 @@ function formatSize(bytes: number) {
 }
 
 function errorMessage(err: unknown) {
-  return err instanceof Error ? err.message : String(err);
+  // The proxy only carries host traffic with the "Everything" scope.
+  return describeNetworkError(err, getSettings().proxyScope === "all" ? proxyUrlSetting() || null : null);
 }

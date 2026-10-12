@@ -233,3 +233,19 @@ describe("migration 13 (archived titles)", () => {
     expect({ ...db.prepare("SELECT name, monitored, archived_at FROM titles WHERE id = 1").get() }).toEqual({ name: "X", monitored: 1, archived_at: null });
   });
 });
+
+describe("migration 14 (calendar)", () => {
+  it("adds the episodes table and schedule columns, cascading with the title", () => {
+    const db = databaseAt(13);
+    db.exec(`
+      INSERT INTO root_folders (id, path, created_at) VALUES (1, '/srv/media', 1);
+      INSERT INTO titles (id, type, name, root_folder_id, folder, created_at, updated_at) VALUES (1, 'show', 'X', 1, 'X', 1, 1);
+    `);
+    migrate(db);
+    expect({ ...db.prepare("SELECT release_date, schedule_synced_at FROM titles WHERE id = 1").get() }).toEqual({ release_date: null, schedule_synced_at: null });
+    db.exec("INSERT INTO episodes (title_id, season, episode, name, air_date) VALUES (1, 1, 1, 'Pilot', '2026-10-05')");
+    expect(() => db.exec("INSERT INTO episodes (title_id, season, episode) VALUES (1, 1, 1)")).toThrow();
+    db.exec("PRAGMA foreign_keys = ON; DELETE FROM titles WHERE id = 1");
+    expect(db.prepare("SELECT COUNT(*) AS n FROM episodes").get()).toEqual({ n: 0 });
+  });
+});

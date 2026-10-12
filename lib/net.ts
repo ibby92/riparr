@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { fetch as undiciFetch, ProxyAgent, Socks5ProxyAgent, type Dispatcher } from "undici";
 import { getSettings } from "./settings";
 
@@ -95,4 +96,70 @@ export function fetchFor(purpose: "container" | "host"): typeof fetch {
   if (!url || proxyUrlError(url)) return fetch;
   if (purpose === "host" && getSettings().proxyScope !== "all") return fetch;
   return proxiedFetch(url);
+}
+
+/** True inside a Docker container. */
+export function inDocker(): boolean {
+  try {
+    return fs.existsSync("/.dockerenv");
+  } catch {
+    return false;
+  }
+}
+
+/** True for URLs pointing at this machine (127.x, ::1, localhost). */
+export function isLoopbackUrl(raw: string): boolean {
+  try {
+    const host = new URL(raw).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    return host === "localhost" || host === "::1" || /^127\./.test(host);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Why a URL can't be used from where Riparr runs, or null. Inside Docker, 127.0.0.1 is Riparr's own
+ * container, so a proxy or FlareSolverr at 127.0.0.1 is never reached.
+ */
+export function loopbackInDockerHint(raw: string, docker = inDocker()): string | null {
+  if (!raw || !docker || !isLoopbackUrl(raw)) return null;
+  return "Riparr runs in Docker, where 127.0.0.1 is its own container. Use your server's LAN address (e.g. http://192.168.1.10:8888; the service must publish its port on that address, not only on 127.0.0.1) or its container name on a shared network (e.g. http://gluetun:8888).";
+}
+
+const REASONS: Record<string, string> = {
+  ECONNREFUSED: "connection refused",
+  ENOTFOUND: "host not found",
+  EAI_AGAIN: "DNS lookup failed",
+  ETIMEDOUT: "timed out",
+  UND_ERR_CONNECT_TIMEOUT: "timed out connecting",
+  ECONNRESET: "connection reset",
+  EHOSTUNREACH: "host unreachable",
+  ENETUNREACH: "network unreachable",
+  CERT_HAS_EXPIRED: "TLS certificate expired",
+  ERR_TLS_CERT_ALTNAME_INVALID: "TLS certificate doesn't match the site",
+};
+
+/**
+ * A readable reason for a failed request. Node's fetch only says "fetch failed"; the cause
+ * (refused, not found, timeout…) is underneath. When the address that failed is the proxy,
+ * says so, with a hint when it's 127.0.0.1 inside Docker.
+ */
+export function describeNetworkError(err: unknown, proxyUrl: string | null = proxyUrlSetting() || null): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = err.cause as (Error & { code?: string; address?: string; port?: number; hostname?: string }) | undefined;
+  if (err.message !== "fetch failed" || !cause) return err.message;
+  const code = cause.code ?? "";
+  const reason = REASONS[code] ?? cause.message ?? code;
+  let proxy: URL | null = null;
+  try {
+    proxy = proxyUrl ? new URL(proxyUrl) : null;
+  } catch {}
+  const target = cause.address ? `${cause.address}${cause.port ? `:${cause.port}` : ""}` : (cause.hostname ?? "");
+  // Through a proxy, Riparr connects to the proxy, not the site: a failed connection on its host or port is the proxy.
+  const atProxy = proxy !== null && (cause.hostname === proxy.hostname || cause.address === proxy.hostname || (cause.port !== undefined && String(cause.port) === proxy.port));
+  if (atProxy && proxy) {
+    const hint = loopbackInDockerHint(proxy.href);
+    return `Can't reach the proxy at ${proxy.host} (${reason})${hint ? `. ${hint}` : ""}`;
+  }
+  return `Network error${target ? ` reaching ${target}` : ""}: ${reason}`;
 }

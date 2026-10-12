@@ -2,7 +2,7 @@ import { crawlContainer } from "@/lib/crawlers";
 import { NeedsAttentionError } from "@/lib/errors";
 import { addLinks } from "@/lib/links";
 import { logDebug } from "@/lib/events";
-import { fetchFor, proxyUrlSetting } from "@/lib/net";
+import { describeNetworkError, fetchFor, proxyUrlSetting } from "@/lib/net";
 import { getSettings } from "@/lib/settings";
 import type { Source } from "@/lib/sources";
 import type { SourceStatus } from "@/lib/titles";
@@ -40,6 +40,8 @@ export async function checkSource(source: Source, signal: AbortSignal): Promise<
     if (err instanceof NeedsAttentionError) {
       return { status: "needs_attention", error: err.message, newLinks: 0 };
     }
+    // Node's fetch says only "fetch failed"; say what actually failed (and whether it was the proxy).
+    if (err instanceof TypeError && err.message === "fetch failed") throw new Error(describeNetworkError(err));
     throw err;
   }
 }

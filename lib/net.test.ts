@@ -130,3 +130,24 @@ describe("proxy URL helpers", () => {
     expect(maskProxyUrl("http://gluetun:8888")).toBe("http://gluetun:8888");
   });
 });
+
+describe("describeNetworkError", () => {
+  const fetchFailed = (cause: object) => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("x"), cause) });
+
+  it("says when the proxy can't be reached, with the Docker hint for 127.0.0.1", async () => {
+    const { describeNetworkError, loopbackInDockerHint } = await import("./net");
+    const refused = fetchFailed({ code: "ECONNREFUSED", address: "127.0.0.1", port: 8888 });
+    expect(describeNetworkError(refused, "http://127.0.0.1:8888")).toMatch(/^Can't reach the proxy at 127\.0\.0\.1:8888 \(connection refused\)/);
+    expect(loopbackInDockerHint("http://127.0.0.1:8888", true)).toMatch(/Docker.*LAN address.*not only on 127.0.0.1/);
+    expect(loopbackInDockerHint("http://localhost:8191", true)).not.toBeNull();
+    expect(loopbackInDockerHint("http://gluetun:8888", true)).toBeNull();
+    expect(loopbackInDockerHint("http://127.0.0.1:8888", false)).toBeNull();
+  });
+
+  it("names other network failures, and leaves ordinary errors alone", async () => {
+    const { describeNetworkError } = await import("./net");
+    expect(describeNetworkError(fetchFailed({ code: "ENOTFOUND", hostname: "mkvdrama.net" }), null)).toBe("Network error reaching mkvdrama.net: host not found");
+    expect(describeNetworkError(fetchFailed({ code: "ENOTFOUND", hostname: "gluetun" }), "http://gluetun:8888")).toMatch(/^Can't reach the proxy at gluetun:8888 \(host not found\)/);
+    expect(describeNetworkError(new Error("HTTP 500 fetching x"), null)).toBe("HTTP 500 fetching x");
+  });
+});

@@ -9,6 +9,7 @@ import { linkSettled, resetFailedExtractions, stopExtraction } from "./extract-r
 import { checkAllRoots } from "./disk";
 import { externalDiskFiles, scanTitle, staleScans } from "@/lib/disk-scan";
 import { timeZone } from "@/lib/time";
+import { syncStaleSchedules } from "@/lib/schedule";
 import { cancelLink, cancelTitle, scheduleDownloads, selectAndSettle } from "./pipeline";
 import { runDueChecks } from "./scheduler";
 import { sweepPartials } from "./partials";
@@ -94,6 +95,7 @@ function rescanStale() {
 
 function tick() {
   timeZone(); // applies a changed Settings → General zone to this process
+  syncStaleSchedules(); // calendar air dates from TMDB, a couple of titles at a time
   for (const command of takeCommands()) handle(command);
   runDueChecks(shutdown.signal);
   rescanStale();
