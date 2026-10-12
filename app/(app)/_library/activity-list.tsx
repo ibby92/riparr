@@ -2,6 +2,8 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import {
+  Archive,
+  ArchiveRestore,
   ArrowDownToLine,
   CircleAlert,
   CircleCheck,
@@ -22,6 +24,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { ACTIVITY_KINDS, type ActivityFile, type ActivityKind } from "@/lib/activity";
+import { clockTime, dateTime, dayLabel as dayLabelIn } from "@/lib/time";
 import { HostChip, Poster, episodeLabel, formatBytes } from "../_kit";
 import type { HistoryEvent } from "../_data/history";
 
@@ -46,6 +49,8 @@ const ICON: Record<ActivityKind, [LucideIcon, Tone]> = {
   title_deleted: [Trash2, "neutral"],
   title_paused: [Pause, "neutral"],
   title_resumed: [Play, "neutral"],
+  title_archived: [Archive, "neutral"],
+  title_unarchived: [ArchiveRestore, "neutral"],
   source_added: [Plus, "neutral"],
   source_changed: [Pencil, "neutral"],
   source_removed: [Trash2, "neutral"],
@@ -74,19 +79,9 @@ const GROUPED = new Set<ActivityKind>(["downloaded", "in_folder"]);
 /** A run of downloads (or files found in the folder) of one title on one day, shown as one row. */
 type Item = { lead: HistoryEvent; events: HistoryEvent[] };
 
-const timeFmt = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" });
-const dayFmt = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" });
-const yearDayFmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
-
-function dayLabel(at: number, now: number): string {
-  const d = new Date(at);
-  const today = new Date(now);
-  const yesterday = new Date(now);
-  yesterday.setDate(today.getDate() - 1);
-  if (d.toDateString() === today.toDateString()) return "Today";
-  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-  return (d.getFullYear() === today.getFullYear() ? dayFmt : yearDayFmt).format(d);
-}
+// Times and days in the configured zone (lib/time.ts).
+const timeFmt = { format: (at: number) => clockTime(at) };
+const dayLabel = (at: number, now: number) => dayLabelIn(at, now, "long");
 
 /** Groups by day, and folds consecutive downloads of the same title into one item. */
 function group(events: HistoryEvent[], now: number) {
@@ -243,6 +238,10 @@ function describe(item: Item, showTitle: boolean): { text: ReactNode; meta?: Rea
       return { text: <>Paused {title}</> };
     case "title_resumed":
       return { text: <>Resumed {title}</> };
+    case "title_archived":
+      return { text: <>Archived {title}</>, meta: <span>No longer checked or downloaded; its settings, files and history are kept</span> };
+    case "title_unarchived":
+      return { text: <>Brought back {title} from the archive</>, meta: <span>Checking its sources again</span> };
     case "source_added":
       return { text: <>Added a source{forTitle}</>, meta: <span className="truncate font-mono">{d.url}</span> };
     case "source_changed":
@@ -362,7 +361,7 @@ function ItemRow({ item, showTitle }: { item: Item; showTitle: boolean }) {
           </div>
         </div>
       </div>
-      <time dateTime={new Date(e.at).toISOString()} title={new Date(e.at).toLocaleString("en-GB")} className="pt-1 text-xs tabular-nums text-muted">
+      <time dateTime={new Date(e.at).toISOString()} title={dateTime(e.at)} className="pt-1 text-xs tabular-nums text-muted">
         {item.events.length > 1 && timeFmt.format(item.events.at(-1)!.at) !== timeFmt.format(e.at)
           ? `${timeFmt.format(item.events.at(-1)!.at)}–${timeFmt.format(e.at)}`
           : timeFmt.format(e.at)}

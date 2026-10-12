@@ -1,6 +1,7 @@
 // Server-only reads for History (reaches the database): user-facing activity, not the full log.
 import { all, one } from "@/lib/db";
 import { parseEpisode } from "@/lib/episodes";
+import { startOfDay } from "@/lib/time";
 import { ACTIVITY_KINDS, kindsIn, type ActivityCategory, type ActivityData, type ActivityKind } from "@/lib/activity";
 import type { EventLevel } from "@/lib/events";
 
@@ -34,14 +35,10 @@ export type HistoryEvent = {
   has_poster: boolean;
 };
 
-/** Start of the period in ms, or null for all time. Days follow the server's time zone. */
+/** Start of the period in ms, or null for all time. Days follow the configured time zone. */
 export function periodStart(period: HistoryPeriod, now: number): number | null {
   if (period === "all") return null;
-  const midnight = new Date(now);
-  midnight.setHours(0, 0, 0, 0);
-  const days = period === "today" ? 0 : period === "7d" ? 6 : 29;
-  midnight.setDate(midnight.getDate() - days);
-  return midnight.getTime();
+  return startOfDay(now, period === "today" ? 0 : period === "7d" ? 6 : 29);
 }
 
 type Row = Omit<HistoryEvent, "data" | "has_poster" | "kind"> & { kind: string; data: string | null; has_poster: number };

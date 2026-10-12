@@ -9,7 +9,7 @@ Most configuration lives in the web UI (**Settings**) and is stored in the datab
 | `PUID` | `1000` | User id that owns created files and `/config` |
 | `PGID` | `1000` | Group id for the same |
 | `UMASK` | `002` | File creation mask |
-| `TZ` | (container default) | Time zone for logs and `{date}` tokens |
+| `TZ` | (container default) | Default time zone when none is chosen in Settings → General |
 | `PORT` | `7676` | Web UI port inside the container |
 | `RIPARR_CONFIG_DIR` | `/config` (image), `./config` (dev) | Where `riparr.db`, backups and cached posters live |
 | `RIPARR_CNL_PORT` | `9666` | Click'n'Load listener port |
@@ -32,6 +32,12 @@ For the gluetun compose overrides (`.env`):
 ## Settings
 
 Each heading below is a page under **Settings**.
+
+### General
+
+| Setting | Default | Notes |
+| --- | --- | --- |
+| Time zone | The container's `TZ` (UTC if unset) | Zone for every time and day shown, and the `{date}` naming token. |
 
 ### Media Management
 

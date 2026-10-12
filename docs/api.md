@@ -109,7 +109,7 @@ Returns the title plus its `sources` and `links` (each link with its status, hos
 
 ### `PATCH /titles/{id}`
 
-Partial update: send only the fields to change. Setting `monitored: false` also stops the title's running downloads. Changing the folder only affects future downloads.
+Partial update: send only the fields to change. Setting `monitored: false` also stops the title's running downloads. Changing the folder only affects future downloads. `archived: true` archives the title (no more checks or downloads; everything else is kept) and `archived: false` brings it back, monitored and checked straight away. Titles include `archived` and `archived_at`; `GET /status` counts archived titles separately (`titles.archived`) and leaves them out of the other counts.
 
 ### `DELETE /titles/{id}`
 

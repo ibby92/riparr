@@ -6,6 +6,7 @@ import { activeLinks, totalSpeed, type LinkWithProgress } from "@/lib/links";
 import { diskTotals, listRootFolders } from "@/lib/root-folders";
 import { readDiskStatus } from "@/lib/settings";
 import { listTitles } from "@/lib/titles";
+import { formatter } from "@/lib/time";
 import { Card, EmptyState, HostChip, PageHeader, ProgressBar, StatCard, formatBytes, formatDuration } from "./_kit";
 import { downloadsByDay, weekStats } from "./_data/dashboard";
 import { allTitleProgress, sourcesByTitle } from "./_data/progress";
@@ -67,9 +68,10 @@ async function DashboardContent() {
   // Request-time render (after connection()): one clock reading per request is intended.
   // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
-  const titles = listTitles();
+  // Archived titles are kept out of the dashboard; they're under Shows/Movies → Archived.
+  const titles = listTitles().filter((t) => t.archived_at === null);
   const roots = listRootFolders();
-  const hour = new Date(now).getHours();
+  const hour = Number(formatter({ hour: "numeric", hourCycle: "h23" }).format(now));
   const greeting = hour < 5 ? "Good evening" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   const addButton = (
     <Link href="/titles/new" className="btn btn-primary">

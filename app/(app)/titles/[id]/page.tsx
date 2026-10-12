@@ -2,8 +2,9 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
-import { ChevronRight, FolderOpen, History, Pause, Pencil, Play, Plus, RefreshCw } from "lucide-react";
+import { Archive, ArchiveRestore, ChevronRight, FolderOpen, History, Pause, Pencil, Play, Plus, RefreshCw } from "lucide-react";
 import { listExtractions, listLinks } from "@/lib/links";
+import { formatter } from "@/lib/time";
 import { listRootFolders } from "@/lib/root-folders";
 import { listSources } from "@/lib/sources";
 import { getTitle } from "@/lib/titles";
@@ -18,7 +19,7 @@ import { historyEvents } from "../../_data/history";
 import { Note, PathText, TabLinks, TitleProgressBar, progressLabel, titlePill, titleReason } from "../../_library/ui";
 import { AutoRefresh } from "../../auto-refresh";
 import { AddLinksForm, ImportDlcForm } from "../add-links-form";
-import { checkTitleNow, toggleTitle } from "../actions";
+import { archiveTitle, checkTitleNow, toggleTitle, unarchiveTitle } from "../actions";
 
 const TABS = ["episodes", "sources", "files", "history"] as const;
 type Tab = (typeof TABS)[number];
@@ -63,7 +64,7 @@ async function TitleDetail({
   const onDisk = onDiskPaths.size + known.disk.filter((d) => !onDiskPaths.has(d.path)).length;
   const busy = links.some((l) => l.status === "resolving" || l.status === "downloading");
   const pill = titlePill(title.status, title.type, progress);
-  const reason = titleReason(title, progress, now);
+  const reason = title.archived_at !== null ? null : titleReason(title, progress, now);
   const counts = { done: 0, active: 0, waiting: 0, missing: 0 };
   for (const r of rows) {
     if (r.state === "done") counts.done++;
@@ -149,31 +150,64 @@ async function TitleDetail({
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <form action={checkTitleNow}>
-                <input type="hidden" name="id" value={title.id} />
-                <button
-                  className="btn btn-primary"
-                  disabled={!title.monitored || sources.length === 0}
-                  title={!title.monitored ? "Resume the title to check it" : sources.length === 0 ? "Add a source first" : undefined}
-                >
-                  <RefreshCw size={16} strokeWidth={1.75} aria-hidden="true" />
-                  Check now
-                </button>
-              </form>
-              <form action={toggleTitle}>
-                <input type="hidden" name="id" value={title.id} />
-                <input type="hidden" name="monitored" value={title.monitored ? "0" : "1"} />
-                <button className="btn">
-                  {title.monitored ? <Pause size={16} strokeWidth={1.75} aria-hidden="true" /> : <Play size={16} strokeWidth={1.75} aria-hidden="true" />}
-                  {title.monitored ? "Pause" : "Resume"}
-                </button>
-              </form>
-              <Link href={`${base}/edit`} className="btn">
-                <Pencil size={16} strokeWidth={1.75} aria-hidden="true" />
-                Edit
-              </Link>
-            </div>
+            {title.archived_at !== null ? (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-sm border border-border bg-surface-2 px-4 py-3">
+                <p className="min-w-0 flex-1 text-sm text-fg-2">
+                  <Archive size={15} strokeWidth={1.75} className="mr-1.5 inline -translate-y-px text-muted" aria-hidden="true" />
+                  Archived on {formatter({ day: "numeric", month: "long", year: "numeric" }).format(title.archived_at)}. Riparr no longer checks its sources or
+                  downloads for it; its settings, files and history are kept.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <form action={unarchiveTitle}>
+                    <input type="hidden" name="id" value={title.id} />
+                    <button className="btn btn-primary">
+                      <ArchiveRestore size={16} strokeWidth={1.75} aria-hidden="true" />
+                      Unarchive
+                    </button>
+                  </form>
+                  <Link href={`${base}/edit`} className="btn">
+                    <Pencil size={16} strokeWidth={1.75} aria-hidden="true" />
+                    Edit
+                  </Link>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <form action={checkTitleNow}>
+                  <input type="hidden" name="id" value={title.id} />
+                  <button
+                    className="btn btn-primary"
+                    disabled={!title.monitored || sources.length === 0}
+                    title={!title.monitored ? "Resume the title to check it" : sources.length === 0 ? "Add a source first" : undefined}
+                  >
+                    <RefreshCw size={16} strokeWidth={1.75} aria-hidden="true" />
+                    Check now
+                  </button>
+                </form>
+                <form action={toggleTitle}>
+                  <input type="hidden" name="id" value={title.id} />
+                  <input type="hidden" name="monitored" value={title.monitored ? "0" : "1"} />
+                  <button className="btn">
+                    {title.monitored ? <Pause size={16} strokeWidth={1.75} aria-hidden="true" /> : <Play size={16} strokeWidth={1.75} aria-hidden="true" />}
+                    {title.monitored ? "Pause" : "Resume"}
+                  </button>
+                </form>
+                <Link href={`${base}/edit`} className="btn">
+                  <Pencil size={16} strokeWidth={1.75} aria-hidden="true" />
+                  Edit
+                </Link>
+                <form action={archiveTitle}>
+                  <input type="hidden" name="id" value={title.id} />
+                  <button
+                    className="btn btn-ghost"
+                    title="Done with it? Archive keeps its settings, files and history, but stops checks and downloads. You can bring it back any time."
+                  >
+                    <Archive size={16} strokeWidth={1.75} aria-hidden="true" />
+                    Archive
+                  </button>
+                </form>
+              </div>
+            )}
           </div>
         </section>
       </div>

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { Bug, ScrollText } from "lucide-react";
 import { debugForcedByEnv, debugLogging, LOG_COMPONENTS, type EventLevel, type LogComponent } from "@/lib/events";
+import { formatter, localDay } from "@/lib/time";
 import { EmptyState, PageHeader } from "../../_kit";
 import { logEntries, logStats, logTitles, type LogEntry, type LogFilter } from "../../_data/logs";
 import { HistoryFilters } from "../../history/filters";
@@ -86,8 +87,9 @@ function parseFilters(sp: Search): LogFilter {
   };
 }
 
-const timeFmt = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-const dateFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
+// Created per render: formatters keep the time zone they were made with (lib/time.ts).
+const timeFmt = { format: (at: number) => formatter({ hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(at) };
+const dateFmt = { format: (at: number) => formatter({ day: "numeric", month: "short" }).format(at) };
 
 async function LogList({ searchParams }: { searchParams: Promise<Search> }) {
   await connection();
@@ -100,7 +102,7 @@ async function LogList({ searchParams }: { searchParams: Promise<Search> }) {
   const titles = logTitles();
   const debugOn = debugLogging();
   const total = Object.values(stats.counts).reduce((a, b) => a + b, 0);
-  const today = new Date(now).toDateString();
+  const today = localDay(now);
 
   const query = (extra: Record<string, string | number | undefined>) => {
     const p = new URLSearchParams();
@@ -175,7 +177,7 @@ async function LogList({ searchParams }: { searchParams: Promise<Search> }) {
         <div className="card overflow-hidden">
           <ol className="divide-y divide-border">
             {entries.map((e) => (
-              <LogRow key={e.id} entry={e} showDate={new Date(e.at).toDateString() !== today} />
+              <LogRow key={e.id} entry={e} showDate={localDay(e.at) !== today} />
             ))}
           </ol>
         </div>

@@ -1,6 +1,6 @@
 // Server-only read helpers for the dashboard (reaches the database).
 import { all, one } from "@/lib/db";
-import { localDay, localDayBefore } from "@/lib/host-status";
+import { formatter, localDay, localDayBefore, startOfDayKey } from "@/lib/time";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -69,12 +69,6 @@ export type DayRow = {
   arrivals: Arrival[];
 };
 
-/** Midnight (local time) at the start of a "YYYY-MM-DD" day key. */
-function startOfLocalDay(key: string) {
-  const [y, m, d] = key.split("-").map(Number);
-  return new Date(y, m - 1, d).getTime();
-}
-
 export function downloadsByDay(now: number, days = 14): { days: DayRow[]; hosts: string[] } {
   // Same source as the sidebar and the Queue: bytes actually transferred per host and local day.
   // It keeps counting downloads of titles deleted since, and includes retried or partial transfers.
@@ -86,7 +80,7 @@ export function downloadsByDay(now: number, days = 14): { days: DayRow[]; hosts:
   const index = new Map<string, DayRow>();
   for (let i = days - 1; i >= 0; i--) {
     const key = localDayBefore(now, i);
-    const label = i === 0 ? "Today" : new Date(startOfLocalDay(key)).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    const label = i === 0 ? "Today" : formatter({ day: "numeric", month: "short" }).format(startOfDayKey(key));
     const row: DayRow = { key, label, total: 0, byHost: {}, arrivals: [] };
     out.push(row);
     index.set(key, row);
@@ -106,7 +100,7 @@ export function downloadsByDay(now: number, days = 14): { days: DayRow[]; hosts:
        FROM files f JOIN links l ON l.id = f.link_id JOIN titles t ON t.id = l.title_id
       WHERE f.status = 'done' AND f.updated_at >= ?
       ORDER BY f.updated_at, t.name, f.season, f.episode`,
-    startOfLocalDay(out[0].key),
+    startOfDayKey(out[0].key),
   );
   for (const a of arrivals) index.get(localDay(a.at))?.arrivals.push({ ...a, has_poster: a.has_poster === 1 });
   const order = ["gofile", "pixeldrain", "mega"];

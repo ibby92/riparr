@@ -146,9 +146,10 @@ export function listLinks(titleId: number): LinkWithProgress[] {
 
 /** Links that are in flight or waiting, for the queue page. */
 export function activeLinks(): LinkWithProgress[] {
+  // Archived titles' leftover links stay put but aren't part of the queue.
   return all<LinkWithProgress>(
     `${WITH_PROGRESS}
-      WHERE l.status IN ('new', 'queued', 'resolving', 'downloading')
+      WHERE l.status IN ('new', 'queued', 'resolving', 'downloading') AND t.archived_at IS NULL
       GROUP BY l.id
       ORDER BY l.status = 'downloading' DESC, l.status = 'resolving' DESC, l.discovered_at, l.id`,
   );

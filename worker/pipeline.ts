@@ -4,6 +4,7 @@ import { downloadFile } from "@/lib/download";
 import { HostOfflineError, NeedsAttentionError, RateLimitError, StallError } from "@/lib/errors";
 import type { ActivityData } from "@/lib/activity";
 import { logDebug, logEvent } from "@/lib/events";
+import { dateTime } from "@/lib/time";
 import { hostAccount } from "@/lib/host-accounts";
 import {
   addHostUsage,
@@ -461,7 +462,7 @@ function handleFailure(link: Link, attempts: number, err: unknown, signal: Abort
       const limit = recordHostLimit(link.host, retryAt, reason, now);
       retryAt = limit.until;
       if (limit.fresh) {
-        logEvent("warn", `${hostLabel(link.host)} limited (${reason}); its downloads resume at ${new Date(retryAt).toISOString()}`, null, "host", {
+        logEvent("warn", `${hostLabel(link.host)} limited (${reason}); its downloads resume at ${dateTime(retryAt)}`, null, "host", {
           kind: "host_limited",
           data: { host: link.host, until: retryAt },
         });

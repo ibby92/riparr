@@ -14,13 +14,16 @@ const FILTERS = [
   { key: "ok", label: "Healthy" },
   { key: "attention", label: "Needs attention" },
   { key: "paused", label: "Paused" },
+  { key: "archived", label: "Archived" },
 ] as const;
 
-function matches(t: TitleWithStats, status: string) {
+/** Archived titles only show under Archived, or in search results. */
+function matches(t: TitleWithStats, status: string, searching = false) {
+  if (status === "archived") return t.status === "archived";
   if (status === "attention") return t.status === "needs_attention" || t.status === "error";
   if (status === "paused") return t.status === "paused";
   if (status === "ok") return t.status === "ok" || t.status === "pending";
-  return true;
+  return t.status !== "archived" || searching;
 }
 
 function one(v: string | string[] | undefined) {
@@ -54,10 +57,11 @@ export async function LibraryView({ type, searchParams }: { type: TitleType; sea
   const Icon = type === "show" ? Tv : Clapperboard;
 
   const all = listTitles(type);
+  const archived = all.filter((t) => t.archived_at !== null).length;
   const q = params.q?.toLowerCase();
   const searched = q ? all.filter((t) => t.name.toLowerCase().includes(q)) : all;
   const status = FILTERS.some((f) => f.key === params.status) ? (params.status ?? "") : "";
-  const shown = searched.filter((t) => matches(t, status));
+  const shown = searched.filter((t) => matches(t, status, Boolean(q)));
   const progress = allTitleProgress(shown, now);
   const sort = params.sort === "recent" ? "recent" : "name";
   if (sort === "recent") shown.sort((a, b) => lastActivity(b, progress.get(b.id)) - lastActivity(a, progress.get(a.id)));
@@ -77,7 +81,13 @@ export async function LibraryView({ type, searchParams }: { type: TitleType; sea
       title={type === "show" ? "Shows" : "Movies"}
       subtitle={
         all.length
-          ? `${all.length} ${all.length === 1 ? noun : plural} · ${all.filter((t) => t.monitored).length} monitored`
+          ? [
+              `${all.length - archived} ${all.length - archived === 1 ? noun : plural}`,
+              `${all.filter((t) => t.monitored).length} monitored`,
+              archived ? `${archived} archived` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")
           : undefined
       }
       actions={add}
@@ -113,7 +123,7 @@ export async function LibraryView({ type, searchParams }: { type: TitleType; sea
     );
   }
 
-  const counts = Object.fromEntries(FILTERS.map((f) => [f.key, searched.filter((t) => matches(t, f.key)).length]));
+  const counts = Object.fromEntries(FILTERS.map((f) => [f.key, searched.filter((t) => matches(t, f.key, Boolean(q))).length]));
   const sources = sourcesByTitle();
 
   return (
@@ -136,7 +146,7 @@ export async function LibraryView({ type, searchParams }: { type: TitleType; sea
       )}
       <div className="mb-4 flex flex-wrap items-center gap-2.5">
         <div role="group" aria-label="Filter by status" className="flex flex-wrap gap-1.5">
-          {FILTERS.map((f) => (
+          {FILTERS.filter((f) => f.key !== "archived" || archived > 0 || status === "archived").map((f) => (
             <FilterChip key={f.key} href={hrefWith(base, params, { status: f.key || undefined })} active={status === f.key} count={counts[f.key]}>
               {f.label}
             </FilterChip>

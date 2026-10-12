@@ -8,6 +8,7 @@ import { startCnlServer } from "./cnl-server";
 import { linkSettled, resetFailedExtractions, stopExtraction } from "./extract-runner";
 import { checkAllRoots } from "./disk";
 import { externalDiskFiles, scanTitle, staleScans } from "@/lib/disk-scan";
+import { timeZone } from "@/lib/time";
 import { cancelLink, cancelTitle, scheduleDownloads, selectAndSettle } from "./pipeline";
 import { runDueChecks } from "./scheduler";
 import { sweepPartials } from "./partials";
@@ -92,6 +93,7 @@ function rescanStale() {
 }
 
 function tick() {
+  timeZone(); // applies a changed Settings → General zone to this process
   for (const command of takeCommands()) handle(command);
   runDueChecks(shutdown.signal);
   rescanStale();

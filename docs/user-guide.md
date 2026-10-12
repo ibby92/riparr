@@ -96,6 +96,17 @@ The template must contain `{filename}` or `{name}`. For example, `{title} - S{se
 
 If a different file already exists at the destination, the new one is saved as `name (1).ext`. An identical file (same size) is skipped.
 
+### Archiving a title
+
+When you're done with a title (it finished airing, or you've stopped following it) but don't want to delete it, **Archive** it from its page:
+
+- Riparr stops checking its sources, downloading, and scanning its folder, and any download in progress stops.
+- Its settings, sources, files on disk and history are all kept, and stay viewable: the title page, **Edit**, **Files** and **History** work as before.
+- It leaves the dashboard, the counts and badges, and the default Shows/Movies views. Find it under the **Archived** filter (or by searching).
+- **Unarchive** on its page brings it back, monitored, and checks its sources straight away.
+
+Deleting a title, by contrast, removes its sources, links and file records from Riparr (files on disk stay, and its History entries remain without a link to it).
+
 ### Title status
 
 A title's status comes from its sources:
@@ -318,6 +329,10 @@ For source pages behind a Cloudflare or DDoS-Guard *challenge*, run FlareSolverr
 | MEGA | None | Public links only; account login isn't supported |
 
 Saved secrets are never shown again: leaving a field empty keeps the saved value, and the checkbox clears it. Credentials are stored unencrypted in `/config/riparr.db`.
+
+## Time zone
+
+**Settings → General → Time zone** sets the zone every time and day in Riparr is shown in: History and Logs, the dashboard's days, host limits ("resumes at 21:30"), backups, and the `{date}` naming token. **Use this browser's zone** fills in your device's zone. By default Riparr uses the container's `TZ` variable (UTC if it isn't set). Changing it doesn't rewrite anything recorded; times are just shown in the new zone.
 
 ## Themes
 

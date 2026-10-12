@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { CircleCheck, CircleDashed, TriangleAlert } from "lucide-react";
+import { formatter, timeZone } from "@/lib/time";
 import { configDir } from "@/lib/db";
 import { SCHEMA_VERSION } from "@/lib/db/migrations";
 import { listRootFolders } from "@/lib/root-folders";
@@ -166,12 +167,17 @@ async function Status() {
         <Info label="Config folder" mono>
           {configDir()}
         </Info>
-        <Info label="Time zone">{Intl.DateTimeFormat().resolvedOptions().timeZone}</Info>
+        <Info label="Time zone">
+          {timeZone()}{" "}
+          <Link href="/settings/general" className="link text-xs">
+            Change
+          </Link>
+        </Info>
         <Info label="Platform">
           {process.platform} {process.arch}
         </Info>
         <Info label="History">
-          {counts.events.toLocaleString("en")} events{counts.firstEventAt ? ` since ${new Date(counts.firstEventAt).toLocaleDateString("en-GB")}` : ""}
+          {counts.events.toLocaleString("en")} events{counts.firstEventAt ? ` since ${formatter({ day: "numeric", month: "short", year: "numeric" }).format(counts.firstEventAt)}` : ""}
         </Info>
       </section>
     </div>

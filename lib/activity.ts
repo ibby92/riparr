@@ -23,6 +23,8 @@ export const ACTIVITY_KINDS = {
   title_deleted: { category: "library", label: "Title deleted" },
   title_paused: { category: "library", label: "Title paused" },
   title_resumed: { category: "library", label: "Title resumed" },
+  title_archived: { category: "library", label: "Title archived" },
+  title_unarchived: { category: "library", label: "Title unarchived" },
   source_added: { category: "library", label: "Source added" },
   source_changed: { category: "library", label: "Source changed" },
   source_removed: { category: "library", label: "Source removed" },

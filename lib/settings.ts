@@ -29,6 +29,8 @@ export function workerHeartbeatAge(): number | null {
 }
 
 export type AppSettings = {
+  /** IANA time zone for every time and day shown (e.g. "America/Toronto"); "" uses the container's TZ. */
+  timeZone: string;
   /** Links downloading at once, across all hosts. */
   concurrency: number;
   /** Links downloading at once from a single host. */
@@ -69,6 +71,7 @@ export type AppSettings = {
 
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  timeZone: "",
   concurrency: 3,
   perHost: 2,
   bytesPerSecond: 0,
@@ -92,6 +95,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
 };
 
 const SETTING_KEYS: Record<keyof AppSettings, string> = {
+  timeZone: "general.time_zone",
   concurrency: "downloads.concurrency",
   perHost: "downloads.per_host",
   bytesPerSecond: "downloads.bytes_per_second",

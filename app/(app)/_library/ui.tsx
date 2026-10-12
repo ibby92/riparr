@@ -10,6 +10,7 @@ import type { EpisodeState, TitleProgress } from "../_data/progress";
 
 /** The pill a title shows: its own status, refined by what its downloads are doing. */
 export function titlePill(status: TitleStatus, type: TitleType, p: TitleProgress | undefined): { state: PillState; label?: string } {
+  if (status === "archived") return { state: "paused", label: "Archived" };
   if (status === "paused" || status === "needs_attention" || status === "error") return { state: status };
   if (p?.downloading) return { state: "downloading" };
   if (p?.waitingHost) return { state: "waiting", label: `Waiting on ${p.waitingHost.label}` };

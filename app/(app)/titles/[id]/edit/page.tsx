@@ -39,6 +39,7 @@ async function EditTitle({ params }: { params: Promise<{ id: string }> }) {
         subtitle={
           <>
             Match, folder, naming and the pages Riparr reads.{" "}
+            {title.archived_at !== null && "This title is archived, so it stays unmonitored until you unarchive it on its page. "}
             <Link href={`/titles/${title.id}`} className="link">
               Back to the title
             </Link>

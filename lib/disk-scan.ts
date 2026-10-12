@@ -113,7 +113,8 @@ export function externalDiskFiles(titleId?: number): DiskFile[] {
 /** Titles whose folder hasn't been scanned for `maxAgeMs`, oldest first. */
 export function staleScans(maxAgeMs: number, limit: number, now = Date.now()): number[] {
   return all<{ id: number }>(
-    "SELECT id FROM titles WHERE disk_scanned_at IS NULL OR disk_scanned_at < ? ORDER BY COALESCE(disk_scanned_at, 0), id LIMIT ?",
+    `SELECT id FROM titles WHERE archived_at IS NULL AND (disk_scanned_at IS NULL OR disk_scanned_at < ?)
+      ORDER BY COALESCE(disk_scanned_at, 0), id LIMIT ?`,
     now - maxAgeMs,
     limit,
   ).map((r) => r.id);

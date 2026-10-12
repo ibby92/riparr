@@ -1,3 +1,4 @@
+import { timeZone } from "@/lib/time";
 import { api } from "@/lib/api";
 import { SCHEMA_VERSION } from "@/lib/db/migrations";
 import { listTitles } from "@/lib/titles";
@@ -8,7 +9,9 @@ import { HEARTBEAT_INTERVAL_MS, readDiskStatus, workerHeartbeatAge } from "@/lib
 import pkg from "@/package.json";
 
 export const GET = api(() => {
-  const titles = listTitles();
+  const everything = listTitles();
+  // Archived titles are kept but not watched: they don't count, and don't raise badges.
+  const titles = everything.filter((t) => t.archived_at === null);
   const counts = Object.fromEntries(
     all<{ status: string; n: number }>("SELECT status, COUNT(*) AS n FROM links GROUP BY status").map((r) => [r.status, r.n]),
   );
@@ -16,6 +19,7 @@ export const GET = api(() => {
   const disk = readDiskStatus();
   return {
     version: pkg.version,
+    time_zone: timeZone(),
     worker: { online: heartbeat !== null && heartbeat < HEARTBEAT_INTERVAL_MS * 3, last_seen_ms: heartbeat },
     schema_version: SCHEMA_VERSION,
     titles: {
@@ -25,6 +29,7 @@ export const GET = api(() => {
       monitored: titles.filter((t) => t.monitored).length,
       needs_attention: titles.filter((t) => t.status === "needs_attention").length,
       error: titles.filter((t) => t.status === "error").length,
+      archived: everything.length - titles.length,
     },
     links: {
       downloading: (counts.downloading ?? 0) + (counts.resolving ?? 0),

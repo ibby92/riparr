@@ -21,6 +21,7 @@ import { clearTmdbCache, createTmdbClient } from "@/lib/tmdb";
 import { KNOWN_HOSTS } from "@/lib/host-ids";
 import { getSettings, NOTIFY_EVENTS, saveSettings, type AppSettings, type NotifyEvent } from "@/lib/settings";
 import { logEvent } from "@/lib/events";
+import { isTimeZone, resetTimeZoneCache } from "@/lib/time";
 
 /**
  * State of a settings page's form. Each page has its own action that parses only
@@ -97,6 +98,18 @@ function saveLogged(section: string, changes: Partial<AppSettings>) {
     .filter(([k, v]) => v !== undefined && JSON.stringify(before[k]) !== JSON.stringify(v))
     .map(([k, v]) => (SECRET_SETTINGS.has(k) ? `${k} changed` : `${k} ${show(before[k])} → ${show(v)}`));
   if (diffs.length) logEvent("info", `${section} settings saved: ${diffs.join(", ")}`, null, "web", { kind: "settings_changed", data: { section, changes: diffs } });
+}
+
+/* ------------------------------------------------------------ general */
+
+export async function saveGeneralSettings(_prev: SettingsState, formData: FormData): Promise<SettingsState> {
+  await requireSession();
+  const values = formValues(formData);
+  const zone = String(formData.get("timeZone") ?? "").trim();
+  if (zone && !isTimeZone(zone)) return { errors: { timeZone: ["Pick a time zone from the list"] }, values };
+  saveLogged("General", { timeZone: zone });
+  resetTimeZoneCache();
+  return saved();
 }
 
 export async function saveMediaSettings(_prev: SettingsState, formData: FormData): Promise<SettingsState> {

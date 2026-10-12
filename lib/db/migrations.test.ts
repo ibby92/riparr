@@ -221,3 +221,15 @@ describe("migration 12 (activity for History)", () => {
     expect(tagged.every((r) => r.data === null)).toBe(true);
   });
 });
+
+describe("migration 13 (archived titles)", () => {
+  it("adds titles.archived_at, null for existing titles", () => {
+    const db = databaseAt(12);
+    db.exec(`
+      INSERT INTO root_folders (id, path, created_at) VALUES (1, '/srv/media', 1);
+      INSERT INTO titles (id, type, name, root_folder_id, folder, created_at, updated_at) VALUES (1, 'show', 'X', 1, 'X', 1, 1);
+    `);
+    migrate(db);
+    expect({ ...db.prepare("SELECT name, monitored, archived_at FROM titles WHERE id = 1").get() }).toEqual({ name: "X", monitored: 1, archived_at: null });
+  });
+});

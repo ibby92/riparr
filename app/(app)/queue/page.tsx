@@ -5,6 +5,7 @@ import { connection } from "next/server";
 import { ArrowDownToLine, Hourglass, RotateCw } from "lucide-react";
 import { queueOverview, hostStatuses, type QueueItem } from "@/lib/queue";
 import { getTitle } from "@/lib/titles";
+import { timeZone } from "@/lib/time";
 import { AutoRefresh } from "../auto-refresh";
 import {
   Card,
@@ -117,6 +118,7 @@ async function Queue() {
   // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
   const q = queueOverview(now);
+  const zone = timeZone();
   const hosts = hostStatuses(now);
   const all = [...q.downloading, ...q.waitingOnHost.flatMap((g) => g.items), ...q.retrying, ...q.queued, ...q.standby];
   const poster = posterLookup();
@@ -160,7 +162,7 @@ async function Queue() {
               </span>
             </div>
             <div className="font-display text-2xl tabular-nums text-fg">
-              {h.state === "limited" && h.until ? <Countdown until={h.until} prefix="" done="any moment" /> : `${h.activeDownloads} active`}
+              {h.state === "limited" && h.until ? <Countdown until={h.until} prefix="" done="any moment" timeZone={zone} /> : `${h.activeDownloads} active`}
             </div>
             <p className="text-xs text-muted">
               {h.state === "limited" ? h.reason : h.state === "errors" ? h.reason : `${formatBytes(h.bytesToday)} today`}
@@ -231,7 +233,7 @@ async function Queue() {
           }
         >
           <p className="mb-3 text-sm text-fg-2">
-            {group.reason}: <Countdown until={group.until} done="resuming any moment" />. Downloads pick up where they
+            {group.reason}: <Countdown until={group.until} done="resuming any moment" timeZone={zone} />. Downloads pick up where they
             stopped.
           </p>
           <ul className="divide-y divide-border">

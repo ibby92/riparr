@@ -436,6 +436,10 @@ export const MIGRATIONS: Migration[] = [
     UPDATE events SET activity = 'disk_low' WHERE message LIKE 'Only % GB free in %';
     UPDATE events SET activity = 'disk_recovered' WHERE message LIKE 'Free space recovered in %';
   `,
+  // Archived titles: kept with their settings, files and history, but no longer checked or downloaded.
+  `
+    ALTER TABLE titles ADD COLUMN archived_at INTEGER;
+  `,
 ];
 
 /** Latest schema version (number of migrations). */

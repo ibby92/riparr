@@ -76,7 +76,7 @@ export function sourceDto(s: Source & Partial<Pick<SourceWithTitle, "title_name"
 
 /** Public shape of a title. */
 export function titleDto(t: TitleWithStats) {
-  return { ...t, season_folders: t.season_folders === 1, monitored: t.monitored === 1 };
+  return { ...t, season_folders: t.season_folders === 1, monitored: t.monitored === 1, archived: t.archived_at !== null };
 }
 
 /**

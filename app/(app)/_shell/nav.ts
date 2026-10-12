@@ -43,6 +43,7 @@ export const NAV: NavEntry[] = [
     label: "Settings",
     icon: Settings,
     items: [
+      { href: "/settings/general", label: "General" },
       { href: "/settings/media", label: "Media Management" },
       { href: "/settings/downloads", label: "Downloads" },
       { href: "/settings/hosts", label: "Hosts" },

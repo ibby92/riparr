@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { connection } from "next/server";
 import { Archive } from "lucide-react";
 import { configDir } from "@/lib/db";
+import { formatter } from "@/lib/time";
 import { backupsDir } from "@/lib/db/backup";
 import { EmptyState, PageHeader, formatBytes } from "../../_kit";
 import { backupRows } from "../_data";
@@ -25,7 +26,8 @@ export default function BackupsPage() {
   );
 }
 
-const dateFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+// Per call: formatters keep the time zone they were made with (lib/time.ts).
+const dateFmt = { format: (at: number | Date) => formatter({ day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(at) };
 
 const KIND = {
   upgrade: { label: "Before upgrade", className: "bg-info-soft text-info" },

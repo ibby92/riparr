@@ -22,6 +22,8 @@ import { ITEM_ICONS, NAV, isActive, isGroup, type BadgeKey, type NavGroup } from
 
 /** The subset of /api/v1/status the shell uses. */
 type Status = {
+  /** The configured time zone (Settings → General). */
+  time_zone?: string;
   worker: { online: boolean };
   titles: { needs_attention: number; error: number };
   links: { downloading: number; queued: number };
@@ -305,7 +307,7 @@ function Sidebar({
               <span className="text-fg-2">{h.label}</span>
               <span className={`ml-auto tabular-nums ${h.state === "limited" ? "text-warn" : ""}`}>
                 {h.state === "limited" && h.until
-                  ? `until ${new Date(h.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                  ? `until ${new Date(h.until).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: status?.time_zone })}`
                   : h.state === "errors"
                     ? "errors"
                     : `${formatBytes(h.bytes_today)} today`}

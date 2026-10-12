@@ -2,7 +2,8 @@ import { api, ApiError, idParam, jsonBody, parseTitleBody, sourceDto, titleDto }
 import { sendCommand } from "@/lib/commands";
 import { listLinks } from "@/lib/links";
 import { listSources } from "@/lib/sources";
-import { deleteTitle, getTitle, updateTitle } from "@/lib/titles";
+import { logEvent } from "@/lib/events";
+import { deleteTitle, getTitle, setTitleArchived, updateTitle } from "@/lib/titles";
 
 type Ctx = RouteContext<"/api/v1/titles/[id]">;
 
@@ -17,10 +18,19 @@ export const GET = api(async (_req, ctx: Ctx) => {
   return { ...titleDto(title), sources: listSources(title.id).map(sourceDto), links: listLinks(title.id) };
 });
 
-/** Partial update: send only the fields to change. */
+/** Partial update: send only the fields to change. `archived: true|false` archives or brings it back. */
 export const PATCH = api(async (req, ctx: Ctx) => {
-  const title = load(await idParam(ctx));
-  const input = parseTitleBody(await jsonBody(req), {
+  let title = load(await idParam(ctx));
+  const { archived, ...body } = await jsonBody(req);
+  if (typeof archived === "boolean" && archived !== (title.archived_at !== null)) {
+    setTitleArchived(title.id, archived);
+    sendCommand(archived ? { type: "cancel_title", titleId: title.id } : { type: "check_title", titleId: title.id });
+    logEvent("info", `${archived ? "Archived" : "Brought back from the archive"}: ${title.name} (API)`, title.id, "web", {
+      kind: archived ? "title_archived" : "title_unarchived",
+    });
+    title = load(title.id);
+  }
+  const input = parseTitleBody(body, {
     type: title.type,
     name: title.name,
     year: title.year,
@@ -34,6 +44,7 @@ export const PATCH = api(async (req, ctx: Ctx) => {
     naming: title.naming,
     monitored: title.monitored === 1,
   });
+  if (title.archived_at !== null) input.monitored = false;
   updateTitle(title.id, input);
   if (!input.monitored) sendCommand({ type: "cancel_title", titleId: title.id });
   return titleDto(getTitle(title.id)!);

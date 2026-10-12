@@ -1,6 +1,7 @@
 import { all, one, run } from "./db";
 import type { RateLimitError } from "./errors";
 import { logDebug, logEvent } from "./events";
+import { dateTime, localDay, localDayBefore } from "./time";
 import { KNOWN_HOSTS } from "./host-ids";
 import { notify } from "./notify";
 
@@ -119,7 +120,7 @@ export function recordHostLimit(host: string, until: number, reason: string, now
   holdHostLinks(host, newUntil);
   logDebug(
     "host",
-    () => `${hostLabel(host)} ${fresh ? "limited" : continuing ? "limit extended" : "limited again"} until ${new Date(newUntil).toISOString()} (${reason})`,
+    () => `${hostLabel(host)} ${fresh ? "limited" : continuing ? "limit extended" : "limited again"} until ${dateTime(newUntil)} (${reason})`,
   );
   return { until: newUntil, fresh };
 }
@@ -158,7 +159,7 @@ export function recordHostError(host: string, message: string, now = clock.now()
 export function clearHostLimit(host: string) {
   const row = statusRow(host);
   if (row?.limited_until == null) return;
-  logEvent("info", `${hostLabel(host)} limit cleared by hand (it was set until ${new Date(row.limited_until).toISOString()}); retrying its downloads`, null, "host", {
+  logEvent("info", `${hostLabel(host)} limit cleared by hand (it was set until ${dateTime(row.limited_until)}); retrying its downloads`, null, "host", {
     kind: "host_limit_ended",
     data: { host },
   });
@@ -174,22 +175,8 @@ export function clearHostLimit(host: string) {
   );
 }
 
-/** UTC day key, e.g. "2026-10-10". */
-/**
- * Day key for usage, e.g. "2026-10-10", in the server's local time zone (TZ),
- * so "today" matches the dashboard. (Rows written before v1.1 used UTC days.)
- */
-export function localDay(at: number) {
-  const d = new Date(at);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** The local day `days` days before the one containing `at`. */
-export function localDayBefore(at: number, days: number) {
-  const d = new Date(at);
-  d.setDate(d.getDate() - days);
-  return localDay(d.getTime());
-}
+// Day keys follow the configured time zone (lib/time.ts). Rows written before v1.1 used UTC days.
+export { localDay, localDayBefore } from "./time";
 
 export function addHostUsage(host: string, bytes: number, now = clock.now()) {
   if (!(bytes > 0)) return;
@@ -246,8 +233,7 @@ export function notifyLongLimits(now = clock.now()): string[] {
     const waiting =
       one<{ n: number }>("SELECT COUNT(*) AS n FROM links WHERE host = ? AND status IN ('new', 'queued')", r.host)?.n ?? 0;
     const hours = Math.floor((now - r.limited_since!) / HOUR);
-    const resumes = new Date(r.limited_until!).toISOString().replace("T", " ").slice(0, 16);
-    const message = `${hostLabel(r.host)} has been limited for ${hours}h (${r.limit_reason}); ${waiting} download(s) waiting, next try ${resumes} UTC`;
+    const message = `${hostLabel(r.host)} has been limited for ${hours}h (${r.limit_reason}); ${waiting} download(s) waiting, next try ${dateTime(r.limited_until!)}`;
     logEvent("warn", message, null, "host", { kind: "host_limited", data: { host: r.host, until: r.limited_until! } });
     void notify({ event: "needs_attention", message });
   }

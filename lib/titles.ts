@@ -5,8 +5,8 @@ import { normalizeTargetDir, renderTemplate, resolveInside, sanitizeSegment } fr
 
 export type TitleType = "show" | "movie";
 export type SourceStatus = "pending" | "ok" | "needs_attention" | "error";
-/** A title's overall state, rolled up from its sources (and `monitored`). */
-export type TitleStatus = SourceStatus | "paused";
+/** A title's overall state, rolled up from its sources (and `monitored`, `archived_at`). */
+export type TitleStatus = SourceStatus | "paused" | "archived";
 
 export type Title = {
   id: number;
@@ -24,6 +24,8 @@ export type Title = {
   monitored: number;
   /** When lib/disk-scan.ts last looked at the title's folder. */
   disk_scanned_at: number | null;
+  /** When the title was archived (kept, but no longer checked or downloaded); null if it isn't. */
+  archived_at: number | null;
   created_at: number;
   updated_at: number;
 };
@@ -106,7 +108,8 @@ const STATS = `
 type StatsRow = Omit<TitleWithStats, "status"> & { source_statuses: string | null };
 
 /** Worst source state wins: needs attention > error > pending > ok. */
-export function rollUpStatus(monitored: boolean, sourceStatuses: SourceStatus[]): TitleStatus {
+export function rollUpStatus(monitored: boolean, sourceStatuses: SourceStatus[], archived = false): TitleStatus {
+  if (archived) return "archived";
   if (!monitored) return "paused";
   for (const s of ["needs_attention", "error", "pending"] as const) if (sourceStatuses.includes(s)) return s;
   return "ok";
@@ -115,7 +118,7 @@ export function rollUpStatus(monitored: boolean, sourceStatuses: SourceStatus[])
 function withStatus(row: StatsRow): TitleWithStats {
   const { source_statuses, ...rest } = row;
   const statuses = (source_statuses ? source_statuses.split(",") : []) as SourceStatus[];
-  return { ...rest, status: rollUpStatus(rest.monitored === 1, statuses) };
+  return { ...rest, status: rollUpStatus(rest.monitored === 1, statuses, rest.archived_at !== null) };
 }
 
 export function listTitles(type?: TitleType): TitleWithStats[] {
@@ -175,6 +178,20 @@ export function updateTitle(id: number, input: TitleInput) {
     input.naming,
     input.monitored ? 1 : 0,
     Date.now(),
+    id,
+  );
+}
+
+/**
+ * Archives a title (stops checks and downloads, keeps everything else) or brings it back,
+ * monitored again. Archived titles stay unmonitored however they're edited.
+ */
+export function setTitleArchived(id: number, archived: boolean, now = Date.now()) {
+  run(
+    "UPDATE titles SET archived_at = ?, monitored = ?, updated_at = ? WHERE id = ?",
+    archived ? now : null,
+    archived ? 0 : 1,
+    now,
     id,
   );
 }

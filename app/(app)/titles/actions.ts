@@ -33,6 +33,7 @@ import {
   deleteTitle,
   findTitleByTmdb,
   getTitle,
+  setTitleArchived,
   setTitleMonitored,
   titleInput,
   updateTitle,
@@ -214,6 +215,8 @@ export async function editTitle(_prev: FormState, formData: FormData): Promise<F
     Object.assign(input, { overview: current.overview, poster_path: current.poster_path, total_episodes: current.total_episodes });
   }
 
+  // An archived title stays unmonitored until it's brought back from the archive.
+  if (current.archived_at !== null) input.monitored = false;
   updateTitle(id, input);
   const changed = changedFields(current, input);
   if (changed.length) logEvent("info", `Title edited (${changed.join(", ")})`, id, "web", { kind: "title_edited", data: { changes: changed } });
@@ -258,9 +261,33 @@ export async function toggleTitle(formData: FormData) {
   await requireSession();
   const id = parseId(formData.get("id"));
   const monitored = formData.get("monitored") === "1";
+  if (getTitle(id)?.archived_at != null) return; // archived: use Unarchive
   setTitleMonitored(id, monitored);
   logEvent("info", monitored ? "Resumed" : "Paused; its downloads stop and resume later", id, "web", { kind: monitored ? "title_resumed" : "title_paused" });
   if (!monitored) sendCommand({ type: "cancel_title", titleId: id });
+  refresh();
+}
+
+/** Archives a title: no more checks or downloads, but its settings, files and history stay. */
+export async function archiveTitle(formData: FormData) {
+  await requireSession();
+  const title = getTitle(parseId(formData.get("id")));
+  if (!title || title.archived_at !== null) return;
+  setTitleArchived(title.id, true);
+  sendCommand({ type: "cancel_title", titleId: title.id });
+  logEvent("info", `Archived ${title.type} "${title.name}"; it's no longer checked or downloaded`, title.id, "web", { kind: "title_archived" });
+  refresh();
+}
+
+/** Brings a title back from the archive: monitored again, and its sources checked now. */
+export async function unarchiveTitle(formData: FormData) {
+  await requireSession();
+  const title = getTitle(parseId(formData.get("id")));
+  if (!title || title.archived_at === null) return;
+  setTitleArchived(title.id, false);
+  sendCommand({ type: "scan_title", titleId: title.id });
+  sendCommand({ type: "check_title", titleId: title.id });
+  logEvent("info", `Brought ${title.type} "${title.name}" back from the archive`, title.id, "web", { kind: "title_unarchived" });
   refresh();
 }
 
