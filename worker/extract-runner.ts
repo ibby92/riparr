@@ -4,6 +4,7 @@ import PQueue from "p-queue";
 import { all, one, run } from "@/lib/db";
 import { titlePasswords } from "@/lib/sources";
 import { getTitle } from "@/lib/titles";
+import { syncFolder } from "@/lib/disk-scan";
 import { logDebug, logEvent } from "@/lib/events";
 import { pendingLinkCount } from "@/lib/links";
 import { notify } from "@/lib/notify";
@@ -125,6 +126,8 @@ async function extractDir(titleId: number, dir: string) {
       case "extracted":
         record(titleId, entryPath, "extracted", null, result.files.length);
         if (settings.extractDeleteArchives) await deleteVolumes(set);
+        // The extracted videos are what's on disk for these episodes now.
+        syncFolder(titleId);
         logEvent("info", `Extracted ${set.name} (${result.files.length} file(s))`, titleId, "extract", { kind: "extracted", data: { count: result.files.length } });
         break;
       case "incomplete":

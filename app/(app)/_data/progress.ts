@@ -2,6 +2,7 @@
 // Imported only by server components (it reaches the database).
 import { all } from "@/lib/db";
 import { externalDiskFiles, type DiskFile } from "@/lib/disk-scan";
+import { isVideo } from "@/lib/video";
 import { parseEpisode } from "@/lib/episodes";
 import { KNOWN_HOSTS } from "@/lib/host-ids";
 import { activeHostLimits, hostLabel, type HostLimit } from "@/lib/host-status";
@@ -23,6 +24,8 @@ export type FileState = {
   speed_bps: number;
   status: FileStatus;
   local_path: string | null;
+  /** Deleted from the folder through Riparr, not to be downloaded again. */
+  removed_at: number | null;
   error: string | null;
   updated_at: number;
   host: string;
@@ -31,8 +34,12 @@ export type FileState = {
   retry_at: number | null;
 };
 
-/** What a viewer cares about, best first. */
-export type EpisodeState = "done" | "downloading" | "waiting" | "retrying" | "queued" | "standby" | "failed" | "missing";
+/**
+ * What a viewer cares about, best first. "done" means in the folder (by the last scan);
+ * "removed" was deleted through Riparr and isn't downloaded again; "missing" has no copy in
+ * the folder or on its way.
+ */
+export type EpisodeState = "done" | "downloading" | "waiting" | "retrying" | "queued" | "standby" | "failed" | "removed" | "missing";
 
 const RANK: Record<EpisodeState, number> = {
   done: 0,
@@ -42,7 +49,8 @@ const RANK: Record<EpisodeState, number> = {
   queued: 4,
   standby: 5,
   failed: 6,
-  missing: 7,
+  removed: 7,
+  missing: 8,
 };
 
 export type FileView = FileState & {
@@ -55,7 +63,7 @@ export type FileView = FileState & {
 
 const FILE_SQL = `
   SELECT f.id AS file_id, f.link_id, l.title_id, f.season, f.episode, f.remote_name AS name, f.dir, f.size,
-         f.bytes_done, f.speed_bps, f.status, f.local_path, f.error, f.updated_at,
+         f.bytes_done, f.speed_bps, f.status, f.local_path, f.removed_at, f.error, f.updated_at,
          l.host, l.status AS link_status, l.error AS link_error, l.retry_at
     FROM files f JOIN links l ON l.id = f.link_id`;
 
@@ -68,11 +76,43 @@ export function hostLimits(now: number): Map<string, HostLimit> {
   }
 }
 
-export function fileView(f: FileState, limits: Map<string, HostLimit>, now: number): FileView {
+/**
+ * Paths of the video files in each title's folder, by the last scan (disk_files). A title
+ * whose folder was never scanned has no entry: its finished downloads are taken at their word.
+ */
+export type DiskIndex = Map<number, Set<string>>;
+
+export function diskIndex(titleId?: number): DiskIndex {
+  const rows = all<{ id: number; path: string | null }>(
+    `SELECT t.id, d.path FROM titles t LEFT JOIN disk_files d ON d.title_id = t.id
+      WHERE t.disk_scanned_at IS NOT NULL ${titleId === undefined ? "" : "AND t.id = ?"}`,
+    ...(titleId === undefined ? [] : [titleId]),
+  );
+  const out: DiskIndex = new Map();
+  for (const r of rows) {
+    const set = out.get(r.id) ?? new Set<string>();
+    if (r.path) set.add(r.path);
+    out.set(r.id, set);
+  }
+  return out;
+}
+
+/** Every video file in a title's folder, by the last scan. */
+export function diskFiles(titleId: number): DiskFile[] {
+  return all<DiskFile>("SELECT * FROM disk_files WHERE title_id = ? ORDER BY season, episode, path", titleId);
+}
+
+export function fileView(f: FileState, limits: Map<string, HostLimit>, now: number, disk?: Set<string>): FileView {
   const base = { ...f, until: null, reason: null };
   switch (f.status) {
     case "done":
     case "skipped":
+      if (f.removed_at !== null) return { ...base, state: "removed", reason: "Deleted from the folder; not downloaded again" };
+      // The folder decides: a finished video that the last scan didn't find is gone. Archives
+      // aren't scanned (they're usually deleted once extracted), so they stay done.
+      if (disk && (!f.local_path || (isVideo(f.local_path) && !disk.has(f.local_path)))) {
+        return { ...base, state: "missing", reason: "No longer in the folder" };
+      }
       return { ...base, state: "done" };
     case "downloading":
       return { ...base, state: "downloading" };
@@ -95,8 +135,9 @@ export function bestFile(files: FileView[]): FileView {
 }
 
 export function titleFileViews(titleId: number, now: number, limits = hostLimits(now)): FileView[] {
+  const disk = diskIndex(titleId).get(titleId);
   return all<FileState>(`${FILE_SQL} WHERE l.title_id = ? ORDER BY f.season, f.episode, f.dir, f.remote_name`, titleId).map((f) =>
-    fileView(f, limits, now),
+    fileView(f, limits, now, disk),
   );
 }
 
@@ -105,11 +146,11 @@ export type EpisodeRow = {
   season: number | null;
   episode: number;
   state: EpisodeState;
-  /** The copy being shown (null for missing episodes and ones already in the folder). */
+  /** The copy being shown (null for missing episodes and ones in the folder that Riparr didn't download). */
   file: FileView | null;
   /** Every copy of this episode across hosts. */
   copies: FileView[];
-  /** A file already in the title's folder that Riparr didn't download (counts as done). */
+  /** A file in the title's folder that Riparr didn't download (counts as done). */
   disk: DiskFile | null;
   /** Hosts Riparr can't download from that the sources list this episode on. */
   unsupported: string[];
@@ -117,7 +158,7 @@ export type EpisodeRow = {
 
 /** What else is known about a title's episodes besides its files. */
 export type EpisodeExtras = {
-  /** Video files already in the folder (see lib/disk-scan.ts). */
+  /** Video files in the folder that Riparr didn't download (see lib/disk-scan.ts). */
   disk: DiskFile[];
   /** Links on hosts Riparr can't download from, with the episode they're for. */
   unsupported: UnsupportedLink[];
@@ -156,9 +197,10 @@ export function episodeExtras(titleId: number): EpisodeExtras {
 }
 
 /**
- * Episodes of a show, by season. An episode already in the title's folder
- * counts as done. When TMDB's episode count is known and the title has one
- * season, episodes no source lists yet show as missing.
+ * Episodes of a show, by season. An episode is done when a file in the title's folder holds
+ * it: Riparr's download (shown with its host) or a file it didn't download. When TMDB's
+ * episode count is known and the title has one season, episodes no source lists yet show as
+ * missing.
  */
 export function episodeRows(title: Pick<TitleWithStats, "total_episodes">, files: FileView[], extras: EpisodeExtras = NO_EXTRAS): EpisodeRow[] {
   const groups = new Map<string, FileView[]>();
@@ -187,7 +229,9 @@ export function episodeRows(title: Pick<TitleWithStats, "total_episodes">, files
     const best = copies.length ? bestFile(copies) : null;
     const onDisk = disk.get(key) ?? null;
     const base = { key, season, episode, copies, unsupported: [...(unsupported.get(key) ?? [])].sort() };
-    if (best?.state === "done") return { ...base, state: "done", file: best, disk: null };
+    // Riparr's own download first; a copy skipped because of a folder file shows that file.
+    const downloaded = copies.find((c) => c.state === "done" && c.status === "done");
+    if (downloaded) return { ...base, state: "done", file: downloaded, disk: null };
     if (onDisk) return { ...base, state: "done", file: null, disk: onDisk };
     return { ...base, state: best?.state ?? "missing", file: best, disk: null };
   };
@@ -220,6 +264,8 @@ function emptyProgress(): TitleProgress {
   return { total: 0, done: 0, downloading: 0, waiting: 0, movieFraction: null, movieState: null, waitingHost: null, latest: null };
 }
 
+const ACTIVE = new Set<EpisodeState>(["downloading", "waiting", "retrying", "queued"]);
+
 /** Rolls file states up to the title level, for cards and lists. */
 export function summarize(title: TitleWithStats, files: FileView[], extras: EpisodeExtras = NO_EXTRAS): TitleProgress {
   const p = emptyProgress();
@@ -241,7 +287,7 @@ export function summarize(title: TitleWithStats, files: FileView[], extras: Epis
   } else {
     const relevant = files.filter((f) => f.state !== "standby");
     const state = files.length ? bestFile(files).state : "missing";
-    const pending = relevant.filter((f) => f.state !== "done" && f.state !== "failed");
+    const pending = relevant.filter((f) => ACTIVE.has(f.state));
     // A movie is done when something finished and nothing is still on its way.
     p.movieState = state === "done" && pending.length ? bestFile(pending).state : state;
     // The movie is already in its folder (from before Riparr, or added by hand).
@@ -267,16 +313,17 @@ export function summarize(title: TitleWithStats, files: FileView[], extras: Epis
 /** Progress for every title in one query. */
 export function allTitleProgress(titles: TitleWithStats[], now: number): Map<number, TitleProgress> {
   const limits = hostLimits(now);
+  const disk = diskIndex();
   const byTitle = new Map<number, FileView[]>();
   for (const f of all<FileState>(FILE_SQL)) {
-    const v = fileView(f, limits, now);
+    const v = fileView(f, limits, now, disk.get(f.title_id));
     const list = byTitle.get(f.title_id);
     if (list) list.push(v);
     else byTitle.set(f.title_id, [v]);
   }
-  const disk = new Map<number, DiskFile[]>();
-  for (const d of externalDiskFiles()) disk.set(d.title_id, [...(disk.get(d.title_id) ?? []), d]);
-  return new Map(titles.map((t) => [t.id, summarize(t, byTitle.get(t.id) ?? [], { disk: disk.get(t.id) ?? [], unsupported: [] })]));
+  const external = new Map<number, DiskFile[]>();
+  for (const d of externalDiskFiles()) external.set(d.title_id, [...(external.get(d.title_id) ?? []), d]);
+  return new Map(titles.map((t) => [t.id, summarize(t, byTitle.get(t.id) ?? [], { disk: external.get(t.id) ?? [], unsupported: [] })]));
 }
 
 export function sourcesByTitle(): Map<number, SourceWithTitle[]> {

@@ -60,7 +60,7 @@ The title page shows progress (downloaded, in progress, waiting, missing) and ha
 
 - **Episodes:** each episode by season, with status, host and size. "Also on gofile" means a mirror exists. Movies show their files instead.
 - **Sources:** each source page with its last check, next check, links found and status, plus every link with **Retry** and **Ignore**. **Edit** changes a source's address, password, check interval and whether its page is read. On a source that needs attention the button reads **Replace URL**. The same list is on the title's **Edit** page.
-- **Files:** what Riparr downloaded, what was [already in the folder](#episodes-already-in-the-folder) (with **Rescan folder**), and the archives Riparr extracted.
+- **Files:** every video file in the title's folder, by the last scan: which host Riparr downloaded it from, or *Added by hand*. **Rescan folder** scans it now, and the bin icon [deletes a file](#deleting-files). Below that, the archives Riparr extracted.
 - **History:** this title's activity.
 
 **Check now** checks every source of the title straight away. **Pause** / **Resume** toggles monitoring. **Edit** changes the title's settings; moving a title to another root folder or folder only affects files downloaded afterwards. **Delete title** (at the bottom of Edit) removes the title, its sources and its history from Riparr; files already downloaded stay on disk.
@@ -71,11 +71,24 @@ Riparr reads the season and episode from the source's metadata when it has them,
 
 An episode that no source offers on gofile, pixeldrain or MEGA shows as *Missing* with the hosts it is on, e.g. "Only on hosts Riparr can't download from: send.now, vikingfile.com". It's picked up if a supported copy appears later.
 
+### The folder is the source of truth
+
+What's on disk is what's in the title's folder. Riparr scans it for video files and every view (episodes, the Files tab, library and dashboard cards, the calendar) counts an episode as on disk only when the scan found a file for it. Riparr's own downloads are added the moment they finish, and extracted videos once an archive is unpacked. Archives themselves aren't scanned, since they're usually deleted after extraction; a finished archive download still counts for its episode.
+
+The folder is scanned when a title is added or edited, when a check finds new links, after an extraction, and every 30 minutes. **Files → Rescan folder** scans it right away and updates the page. Hidden files and folders (such as `.riparr-partial`) are skipped. If the root folder itself is unreachable (e.g. an unmounted share), the last scan is kept so episodes don't suddenly look missing.
+
 ### Episodes already in the folder
 
-Riparr scans each title's folder for video files it didn't download itself: episodes you had before adding the title, or files you copied in by hand. It reads the episode number from the file name the same way (a bare `EP05` inside a `Season 02` folder is S02E05). Those episodes count as on disk, show as **In folder**, and aren't downloaded again, even if a source offers them under a different name. For a movie, any video file in its folder counts.
+Video files Riparr didn't download itself, such as episodes you had before adding the title or files you copied in by hand, count as on disk too. Riparr reads the episode number from the file name the same way (a bare `EP05` inside a `Season 02` folder is S02E05). Those episodes show as **In folder** and aren't downloaded again, even if a source offers them under a different name. For a movie, any video file in its folder counts.
 
-The folder is scanned when a title is added or edited, when a check finds new links, and every 30 minutes. **Files → Rescan folder** scans it right away. Hidden files and folders (such as `.riparr-partial`) are skipped. If the root folder itself is unreachable (e.g. an unmounted share), the last scan is kept so episodes don't suddenly look missing.
+### Deleting files
+
+The bin icon on **Files** deletes a video file from the folder. Riparr asks whether to **Download it again**:
+
+- **Ticked:** the episode goes back in the queue and is fetched from the preferred host.
+- **Not ticked:** the episode shows as *Deleted* and Riparr won't download it again, from any host, until you click **Download again** on the episode (or the movie's **Download** card).
+
+If you delete one of Riparr's downloads outside Riparr (in a file manager, or Plex), the next scan notices it's gone and downloads the episode again, unless another file in the folder still has that episode. Both kinds of delete appear in **History** under *Library changes*.
 
 ### Naming templates
 
@@ -278,7 +291,7 @@ Once all of a title's downloads have settled, Riparr extracts finished archives 
 **Activity → History** is your activity feed: what Riparr downloaded, what changed in your library, and anything that needed you. It isn't the technical log (that's [System → Logs](#logs-and-debug-logging)), so worker restarts, retries and rescans don't appear here.
 
 - **Summary** for the period: files downloaded and for how many titles, data, new links found, and problems.
-- **Show:** *Everything*, *Downloads* (downloads, files already in the folder, new links, extracted archives), *Library changes* (titles and sources you added, edited, paused or removed, links you retried or ignored, settings changes with old → new values) or *Problems* (sources needing attention or failing repeatedly, failed downloads, files with no working copy, archive problems, host limits, low disk space, and when those ended).
+- **Show:** *Everything*, *Downloads* (downloads, files already in the folder, new links, extracted archives), *Library changes* (titles and sources you added, edited, paused or removed, links you retried or ignored, settings changes with old → new values, files deleted or found missing from a folder) or *Problems* (sources needing attention or failing repeatedly, failed downloads, files with no working copy, archive problems, host limits, low disk space, and when those ended).
 - **Rows** read as sentences with the title's poster, the episode, host and size, e.g. "Downloaded S01E16 of Irreplaceable · pixeldrain · 791 MB". A burst of downloads of one title becomes one row ("Downloaded 3 episodes of Irreplaceable (S01E14–E16)") with the files listed underneath.
 - Filter by title and period. Each title page's **History** tab shows the same feed for that title.
 
@@ -345,7 +358,7 @@ For source pages behind a Cloudflare or DDoS-Guard *challenge*, run FlareSolverr
 | --- | --- | --- |
 | pixeldrain | API key | Higher limits |
 | gofile | Account token | Premium access. Leave empty to use a guest account. |
-| gofile | Website token salt | Only needed if gofile changes its token salt and folders start failing (see [troubleshooting](troubleshooting.md#gofile-folders-fail)) |
+| gofile | Website token salt | Normally filled in by **Refresh salt** (or the automatic option); type a value only to override it (see [troubleshooting](troubleshooting.md#gofile-folders-fail)) |
 | MEGA | None | Public links only; account login isn't supported |
 
 Saved secrets are never shown again: leaving a field empty keeps the saved value, and the checkbox clears it. Credentials are stored unencrypted in `/config/riparr.db`.

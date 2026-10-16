@@ -454,6 +454,14 @@ export const MIGRATIONS: Migration[] = [
     ALTER TABLE titles ADD COLUMN release_date TEXT;
     ALTER TABLE titles ADD COLUMN schedule_synced_at INTEGER;
   `,
+  // Files deleted from the folder on purpose: kept (status 'skipped') so they aren't downloaded again,
+  // but no longer counted as on disk. Earlier deletes left 'skipped' rows without a path; mark those.
+  // Earlier delete entries become History activity.
+  `
+    ALTER TABLE files ADD COLUMN removed_at INTEGER;
+    UPDATE files SET removed_at = updated_at WHERE status = 'skipped' AND local_path IS NULL;
+    UPDATE events SET activity = 'file_deleted' WHERE component = 'disk' AND message LIKE 'Deleted % from the folder%';
+  `,
 ];
 
 /** Latest schema version (number of migrations). */

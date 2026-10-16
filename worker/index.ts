@@ -7,7 +7,7 @@ import { getSettings, HEARTBEAT_INTERVAL_MS, writeHeartbeat } from "@/lib/settin
 import { startCnlServer } from "./cnl-server";
 import { linkSettled, resetFailedExtractions, stopExtraction } from "./extract-runner";
 import { checkAllRoots } from "./disk";
-import { externalDiskFiles, scanTitle, staleScans } from "@/lib/disk-scan";
+import { staleScans, syncFolder } from "@/lib/disk-scan";
 import { timeZone } from "@/lib/time";
 import { syncStaleSchedules } from "@/lib/schedule";
 import { cancelLink, cancelTitle, scheduleDownloads, selectAndSettle } from "./pipeline";
@@ -51,22 +51,7 @@ function handle(command: Command) {
       linkSettled(command.titleId); // rescans now, or when its downloads finish
       break;
     case "scan_title": {
-      const found = scanTitle(command.titleId);
-      if (command.manual) {
-        // Riparr's own downloads are tracked already; what matters is what else is in the folder.
-        const external = found ? externalDiskFiles(command.titleId) : [];
-        const episodes = new Set(external.filter((f) => f.episode != null).map((f) => `${f.season ?? 1}x${f.episode}`));
-        logEvent(
-          found ? "info" : "warn",
-          !found
-            ? "Couldn't rescan the folder: its root folder isn't reachable"
-            : external.length
-              ? `Rescanned the folder: ${external.length} video file(s) not downloaded by Riparr${episodes.size ? ` (${episodes.size} episode(s))` : ""}`
-              : `Rescanned the folder: nothing besides Riparr's own downloads (${found.length} file(s))`,
-          command.titleId,
-          "scan",
-        );
-      }
+      if (!syncFolder(command.titleId)) logDebug("scan", "Folder not rescanned: its root folder isn't reachable", command.titleId);
       // Pending copies of episodes that turned up on disk aren't needed any more.
       selectAndSettle(command.titleId);
       break;
@@ -86,7 +71,7 @@ function cleanPartials() {
 function rescanStale() {
   for (const titleId of staleScans(RESCAN_MS, 3)) {
     try {
-      scanTitle(titleId);
+      syncFolder(titleId);
     } catch (err) {
       logThrottled(`scan:${titleId}`, HOUR, "warn", `Folder scan failed: ${errorText(err)}`, titleId, "scan");
     }

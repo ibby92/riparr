@@ -10,7 +10,7 @@ process.env.RIPARR_CONFIG_DIR = tmp;
 const { closeDb, run } = await import("@/lib/db");
 const { addRootFolder } = await import("@/lib/root-folders");
 const { createTitle, getTitle, titleInput } = await import("@/lib/titles");
-const { episodeRows, summarize, unsupportedLinks } = await import("./progress");
+const { episodeRows, fileView, summarize, unsupportedLinks } = await import("./progress");
 
 afterAll(() => {
   closeDb();
@@ -19,9 +19,30 @@ afterAll(() => {
 
 const view = (episode: number, state: FileView["state"], host = "gofile"): FileView =>
   ({ file_id: episode * 10, link_id: episode, title_id: 1, season: 1, episode, name: `S.S01E0${episode}.mkv`, dir: "", size: 100, bytes_done: 0, speed_bps: 0,
-     status: state === "done" ? "done" : "queued", local_path: null, error: null, updated_at: 1, host, link_status: "queued", link_error: null, retry_at: null,
+     status: state === "done" ? "done" : "queued", local_path: null, removed_at: null, error: null, updated_at: 1, host, link_status: "queued", link_error: null, retry_at: null,
      state, until: null, reason: null }) as FileView;
 const disk = (episode: number | null, p = `/m/S/mine ${episode}.mkv`) => ({ title_id: 1, path: p, size: 50, season: 1, episode, mtime: 1 });
+
+describe("fileView", () => {
+  const row = (patch: Partial<FileView>) =>
+    ({ ...view(1, "done"), local_path: "/m/S/S.S01E01.mkv", ...patch }) as FileView;
+  const state = (f: FileView, disk?: Set<string>) => fileView(f, new Map(), 0, disk).state;
+
+  it("takes the folder's word for finished videos", () => {
+    expect(state(row({}), new Set(["/m/S/S.S01E01.mkv"]))).toBe("done");
+    expect(state(row({}), new Set())).toBe("missing"); // deleted by hand since
+    expect(state(row({}))).toBe("done"); // folder never scanned
+    // Archives aren't scanned, and a copy skipped for a folder file is done while that file is there.
+    expect(state(row({ local_path: "/m/S/S.part1.rar" }), new Set())).toBe("done");
+    expect(state(row({ status: "skipped", local_path: "/m/S/mine.mkv" }), new Set(["/m/S/mine.mkv"]))).toBe("done");
+  });
+
+  it("shows a file deleted through Riparr as removed, not in the folder", () => {
+    // The 100 Days of Deception case: deleted without "download again".
+    expect(state(row({ status: "skipped", local_path: null, removed_at: 5 }), new Set())).toBe("removed");
+    expect(state(row({ status: "skipped", local_path: null, removed_at: 5 }))).toBe("removed");
+  });
+});
 
 describe("episodeRows", () => {
   it("counts an episode already in the folder as done, and says which unsupported hosts list a missing one", () => {
@@ -40,6 +61,20 @@ describe("episodeRows", () => {
       [3, "missing", null, ["send.now", "vikingfile.com"]],
       [4, "missing", null, []],
     ]);
+  });
+
+  it("doesn't count an episode whose files are gone, or show their host and size as on disk", () => {
+    const rows = episodeRows({ total_episodes: null }, [view(1, "removed"), view(2, "missing")], { disk: [], unsupported: [] });
+    expect(rows.map((r) => [r.episode, r.state, r.disk])).toEqual([
+      [1, "removed", null],
+      [2, "missing", null],
+    ]);
+  });
+
+  it("shows the folder file, not the copy skipped because of it", () => {
+    const skipped = { ...view(1, "done"), status: "skipped" } as FileView;
+    const rows = episodeRows({ total_episodes: null }, [skipped], { disk: [disk(1)], unsupported: [] });
+    expect(rows.map((r) => [r.state, r.file, r.disk?.path])).toEqual([["done", null, "/m/S/mine 1.mkv"]]);
   });
 
   it("prefers Riparr's finished copy over the folder file, and the folder file over a pending copy", () => {
@@ -62,6 +97,12 @@ describe("summarize", () => {
   it("counts folder episodes towards a show's progress", () => {
     const p = summarize(make("show", 3), [view(2, "done")], { disk: [disk(1)], unsupported: [] });
     expect(p).toMatchObject({ total: 3, done: 2 });
+  });
+
+  it("doesn't count deleted episodes, and shows a deleted movie as deleted", () => {
+    expect(summarize(make("show", 2), [view(1, "removed"), view(2, "missing")], { disk: [], unsupported: [] })).toMatchObject({ total: 2, done: 0 });
+    const movie = make("movie", null);
+    expect(summarize(movie, [view(1, "removed")], { disk: [], unsupported: [] })).toMatchObject({ movieState: "removed", done: 0 });
   });
 
   it("marks a movie done when its folder already has a video", () => {

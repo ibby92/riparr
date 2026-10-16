@@ -12,7 +12,7 @@ export type Command =
   /** Retry archives that failed or needed a password (e.g. after a source password changed). */
   | { type: "extract_title"; titleId: number }
   /** Rescan the title's folder for files already on disk (lib/disk-scan.ts). */
-  | { type: "scan_title"; titleId: number; manual?: boolean };
+  | { type: "scan_title"; titleId: number };
 
 type CommandRow = { id: number; type: string; payload: string };
 

@@ -116,7 +116,9 @@ flowchart TD
 
 ### Folder scans
 
-`lib/disk-scan.ts` `scanTitle()` walks `<root>/<folder>` (hidden entries skipped, 3 levels deep) for video files and stores them in `disk_files` with the season and episode parsed from the name. The worker scans a title on the `scan_title` command (sent when a title is added or edited, and by **Rescan folder**), when a check finds new links, before the first mirror selection of a title never scanned, and every 30 minutes (a few titles per tick). `externalDiskFiles()` returns the files no `done` file row points at; those are what count as already on disk, in the pipeline and in the UI. If the root folder is missing, the previous scan's rows are kept.
+`disk_files` is the single record of what's on disk. `lib/disk-scan.ts` `scanTitle()` walks `<root>/<folder>` (hidden entries skipped, 3 levels deep) for video files and stores them with the season and episode parsed from the name; `recordDownload()` adds a download the moment it finishes. `syncFolder()` scans and then reconciles: Riparr's finished video downloads whose file is gone (and not deleted through Riparr, and not covered by another file of the episode) go back to `standby` with their link `queued`, logged as `files_missing` activity. It runs on the `scan_title` command (title added or edited), from **Rescan folder** (synchronously, in the web process), when a check finds new links, after an extraction, and every 30 minutes (a few titles per tick). If the root folder is missing, the previous scan's rows are kept.
+
+The read model (`app/(app)/_data/progress.ts`) checks each finished video copy against the scan: a copy whose path the scan didn't find is *missing*, one with `files.removed_at` (deleted through Riparr without re-download, `lib/file-delete.ts`) is *removed*. Archives aren't scanned, so finished archive copies stay done. `externalDiskFiles()` returns the scanned files no `done` file row points at: those are shown as *In folder* and make pending copies of their episodes unnecessary (`coveredByDisk`, which marks them `skipped` pointing at that file). Title stats and the calendar read `disk_files` the same way.
 
 ### Failure handling
 

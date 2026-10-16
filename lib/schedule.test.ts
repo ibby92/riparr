@@ -53,7 +53,10 @@ describe("schedule", () => {
     const id = all<{ id: number }>("SELECT id FROM titles WHERE name = 'Between Steps'")[0].id;
     run("INSERT INTO links (id, title_id, url, fingerprint, host, status, discovered_at) VALUES (1, ?, 'u1', 'f1', 'gofile', 'done', 1)", id);
     run("INSERT INTO links (id, title_id, url, fingerprint, host, status, discovered_at) VALUES (2, ?, 'u2', 'f2', 'pixeldrain', 'queued', 1)", id);
-    run("INSERT INTO files (link_id, key, remote_name, status, season, episode, updated_at) VALUES (1, 'a', 'E1', 'done', 1, 1, 1)");
+    // E1 came as an archive (not scanned, so its finished download counts); E2 is in the folder.
+    run("INSERT INTO files (link_id, key, remote_name, status, local_path, season, episode, updated_at) VALUES (1, 'a', 'E1.rar', 'done', '/m/E1.rar', 1, 1, 1)");
+    // A finished video that's no longer in the folder doesn't count.
+    run("INSERT INTO files (link_id, key, remote_name, status, local_path, season, episode, updated_at) VALUES (1, 'b', 'E5.mkv', 'done', '/m/E5.mkv', 1, 5, 1)");
     run("INSERT INTO files (link_id, key, remote_name, status, season, episode, updated_at) VALUES (2, 'c', 'E3', 'downloading', 1, 3, 1)");
     run("INSERT INTO files (link_id, key, remote_name, status, season, episode, updated_at) VALUES (2, 'd', 'E4', 'queued', 1, 4, 1)");
     run("INSERT INTO disk_files (title_id, path, size, season, episode, mtime) VALUES (?, '/m/E2.mkv', 1, 1, 2, 1)", id);

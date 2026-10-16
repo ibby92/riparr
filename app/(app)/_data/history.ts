@@ -77,6 +77,10 @@ export function legacyData(kind: string, message: string, titleId: number | null
   if (kind === "source_changed" && (m = /^Source page changed (?:from (\S+) )?to (\S+)$/.exec(message))) return { from: m[1], to: m[2] };
   if ((m = /^Source (?:added|removed|enabled|disabled): (\S+)$/.exec(message))) return { url: m[1] };
   if (kind === "title_deleted" && (m = /^Deleted (?:show|movie) "(.+)"/.exec(message))) return { name: m[1] };
+  if (kind === "file_deleted" && (m = /^Deleted (.+?) from the folder(; it will be downloaded again)?/.exec(message))) {
+    const ref = parseEpisode(m[1]);
+    return { files: [{ name: m[1], season: ref?.season ?? null, episode: ref?.episode ?? null, size: null }], redownload: Boolean(m[2]) };
+  }
   return {};
 }
 

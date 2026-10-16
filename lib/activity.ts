@@ -32,6 +32,9 @@ export const ACTIVITY_KINDS = {
   source_disabled: { category: "library", label: "Source disabled" },
   link_retried: { category: "library", label: "Link retried" },
   link_ignored: { category: "library", label: "Link ignored" },
+  file_deleted: { category: "library", label: "File deleted" },
+  files_missing: { category: "library", label: "Missing from the folder" },
+  file_requeued: { category: "library", label: "Downloading again" },
   root_folder_added: { category: "library", label: "Root folder added" },
   root_folder_removed: { category: "library", label: "Root folder removed" },
   settings_changed: { category: "library", label: "Settings changed" },
@@ -75,4 +78,6 @@ export type ActivityData = {
   section?: string;
   /** What changed, e.g. settings "cnlEnabled true → false" or title fields. */
   changes?: string[];
+  /** A deleted or missing file is downloaded again. */
+  redownload?: boolean;
 };

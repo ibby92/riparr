@@ -295,12 +295,14 @@ describe.skipIf(!sevenZip)("pipeline + extraction", () => {
 describe("pipeline + preferred hosts", () => {
   const signal = new AbortController().signal;
   let n = 0;
+  let lastTitle = 0;
 
   async function mirrorTitle(links: string[]) {
     const key = `m${++n}`;
     mirrorCrates[key] = links;
     const id = addTitle({ name: `Mirrors ${key}`, url: `${base}/mcrate/${key}`, folder: `mirrors/Mirrors ${key}` });
     await check(id, signal);
+    lastTitle = id;
     return id;
   }
   const statuses = (id: number) => Object.fromEntries(listLinks(id).map((l) => [l.host, l.status]));
@@ -309,7 +311,7 @@ describe("pipeline + preferred hosts", () => {
 
   beforeAll(async () => {
     (await import("@/lib/settings")).saveSettings({ hostPriority: ["hostb", "hosta"] });
-    for (const name of ["m1.bin", "m2.bin", "m3.bin"]) files[name] = crypto.randomBytes(20_000);
+    for (const name of ["m1.bin", "m2.bin", "m3.bin", "m4.bin"]) files[name] = crypto.randomBytes(20_000);
   });
 
   it("downloads each file once, from the preferred host, and marks the other link as a mirror", async () => {
@@ -340,6 +342,37 @@ describe("pipeline + preferred hosts", () => {
     // An hour-long Retry-After is a host-wide cooldown; lift it so later tests can use hostb.
     expect(hostLimit("hostb")).toMatchObject({ reason: "hostb rate limit" });
     clearHostLimit("hostb");
+  });
+
+  it("downloads a deleted file again from the preferred host, not the copy used before", async () => {
+    // The last title got m3.bin from hosta while hostb was limited; hostb's link settled as a mirror.
+    const id = lastTitle;
+    rawStatus.delete("b:m3.bin");
+    rawHits.length = 0;
+    const { deleteTitleFile } = await import("@/lib/file-delete");
+    const target = path.join(tmp, "downloads", "mirrors", `Mirrors m${n}`, "m3.bin");
+    expect(deleteTitleFile(id, target, true)).toMatchObject({ ok: true, requeued: 1 });
+    await drain(id);
+    expect(hitsFor("m3.bin")).toEqual(["b:m3.bin"]);
+    expect(statuses(id)).toEqual({ hosta: "mirror", hostb: "done" });
+    expect(saved("m3.bin").equals(files["m3.bin"])).toBe(true);
+  });
+
+  it("tries a preferred host that failed the first time again when a deleted file is downloaded again", async () => {
+    rawStatus.set("b:m4.bin", 404);
+    const id = await mirrorTitle(["/b/m4.bin", "/a/m4.bin"]);
+    await drain(id);
+    expect(statuses(id)).toEqual({ hosta: "done", hostb: "offline" });
+
+    // hostb works now: downloading again re-checks it, and host priority picks it.
+    rawStatus.delete("b:m4.bin");
+    rawHits.length = 0;
+    const { deleteTitleFile } = await import("@/lib/file-delete");
+    expect(deleteTitleFile(id, path.join(tmp, "downloads", "mirrors", `Mirrors m${n}`, "m4.bin"), true)).toMatchObject({ ok: true });
+    await drain(id);
+    expect(hitsFor("m4.bin").every((h) => h.startsWith("b:"))).toBe(true);
+    expect(statuses(id)).toEqual({ hosta: "mirror", hostb: "done" });
+    expect(saved("m4.bin").equals(files["m4.bin"])).toBe(true);
   });
 });
 
@@ -438,8 +471,8 @@ describe("pipeline + host limits, stalls and usage", () => {
 
   it("records bytes downloaded per host for today", () => {
     const usage = Object.fromEntries(hostStatuses().map((h) => [h.host, h.bytesToday]));
-    // hosta: m2, m3, l1 (20k + 20k + 40k) and s1 (15k before the stall + 25k after).
-    expect(usage.hosta).toBe(20_000 + 20_000 + 40_000 + 40_000);
+    // hosta: m2, m3, m4, l1 (20k + 20k + 20k + 40k) and s1 (15k before the stall + 25k after).
+    expect(usage.hosta).toBe(20_000 + 20_000 + 20_000 + 40_000 + 40_000);
     expect(usage.hostb).toBeGreaterThanOrEqual(20_000 + 40_000);
     expect(usage.fakehost).toBeGreaterThan(0);
     expect(hostStatuses().slice(0, 3).map((h) => h.host)).toEqual(["gofile", "pixeldrain", "mega"]);

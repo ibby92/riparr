@@ -7,6 +7,7 @@ import {
   ArrowDownToLine,
   CircleAlert,
   CircleCheck,
+  FileX,
   FolderCheck,
   FolderPlus,
   HardDrive,
@@ -58,6 +59,9 @@ const ICON: Record<ActivityKind, [LucideIcon, Tone]> = {
   source_disabled: [Pause, "neutral"],
   link_retried: [RotateCw, "neutral"],
   link_ignored: [XCircle, "neutral"],
+  file_deleted: [Trash2, "neutral"],
+  files_missing: [FileX, "warn"],
+  file_requeued: [RotateCw, "neutral"],
   root_folder_added: [FolderPlus, "neutral"],
   root_folder_removed: [Trash2, "neutral"],
   settings_changed: [Settings2, "neutral"],
@@ -273,6 +277,32 @@ function describe(item: Item, showTitle: boolean): { text: ReactNode; meta?: Rea
           </>
         ),
       };
+    case "file_deleted":
+    case "files_missing":
+    case "file_requeued": {
+      const files = d.files ?? [];
+      const range = episodeRange(files);
+      const what = files.length === 1 ? fileLabel(files[0]) : `${files.length || "some"} ${files.length && files.every((f) => f.episode != null) ? "episodes" : "files"}`;
+      const verb = e.kind === "file_deleted" ? "Deleted" : e.kind === "files_missing" ? "Found missing from the folder:" : "Downloading again:";
+      const meta = { file_deleted: d.redownload ? "Downloading it again" : "Not downloaded again", files_missing: "Deleted outside Riparr; downloading again", file_requeued: null }[e.kind];
+      // The file's own name, when the sentence shows its episode instead.
+      const name = e.kind !== "file_requeued" && files.length === 1 && files[0].episode != null ? files[0].name : null;
+      return {
+        text: (
+          <>
+            {verb} <b className="font-medium">{what}</b>
+            {forTitle}
+            {range && <span className="text-muted"> ({range})</span>}
+          </>
+        ),
+        meta: (
+          <>
+            {meta && <span>{meta}</span>}
+            {name && <span className="truncate font-mono">{name}</span>}
+          </>
+        ),
+      };
+    }
     case "root_folder_added":
     case "root_folder_removed":
       return { text: <>{e.kind === "root_folder_added" ? "Added" : "Removed"} the root folder <span className="font-mono">{d.path}</span></> };

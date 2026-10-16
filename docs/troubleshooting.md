@@ -88,7 +88,7 @@ That host isn't supported; only gofile, pixeldrain and MEGA are. The link is set
 
 ### An episode shows *Missing* although it's in the folder
 
-Riparr reads the episode number from the file name (`S01E05`, `1x05`, `E05`, `EP05`, `Episode 5`). A file named without one can't be matched; rename it, or keep it as is and Riparr may download its own copy. Files Riparr finds in the folder are listed under **Files → Already in the folder**. After moving files in by hand, use **Rescan folder** there (otherwise the next scan is within 30 minutes).
+Riparr reads the episode number from the file name (`S01E05`, `1x05`, `E05`, `EP05`, `Episode 5`). A file named without one can't be matched; rename it, or keep it as is and Riparr may download its own copy. Files Riparr finds in the folder are listed under **Files**, marked *Added by hand*. After moving files in or out by hand, use **Rescan folder** there (otherwise the next scan is within 30 minutes).
 
 ### "Only on hosts Riparr can't download from: …"
 
@@ -116,8 +116,13 @@ pixeldrain wants a captcha for this file, usually because it's very popular or y
 
 gofile's API needs a token that's computed from a secret value gofile changes every few months.
 
-- **Short term:** add a gofile premium token in **Settings → Hosts**, or rely on another host's copy.
-- **Proper fix:** when the new value is known (projects like gofile-downloader publish it), enter it as **Website token salt** under the gofile account.
+- **Proper fix:** click **Refresh salt** under gofile in **Settings → Hosts**. Riparr downloads gofile's token script and reads the current value from it. The script runs in a locked-down child process (Node permission model with no file, network or process access, plus a timeout), and the value is only stored if the script's own result matches. Tick **Refresh the salt automatically** to have Riparr do this itself, at most every 6 hours, when gofile starts rejecting the salt.
+- **Manual:** enter the value as **Website token salt** under the gofile account; that always wins over the refreshed one.
+- **Short term:** add a gofile premium token, or rely on another host's copy.
+
+**"gofile: error-wrongToken"**
+
+Riparr's cached guest token was invalidated. It now replaces the guest and retries on its own; restart the worker if you're on an older build.
 
 Other gofile messages:
 

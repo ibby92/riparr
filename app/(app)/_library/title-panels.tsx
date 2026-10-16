@@ -1,13 +1,15 @@
 // Tab panels of the title page (server components; forms post to the title Server Actions).
+import path from "node:path";
 import Link from "next/link";
-import { FolderOpen, Info, RefreshCw, TriangleAlert } from "lucide-react";
+import { FolderOpen, Info, RefreshCw, RotateCw, TriangleAlert } from "lucide-react";
 import type { DiskFile } from "@/lib/disk-scan";
 import type { ExtractionRow } from "@/lib/links";
 import type { SourceWithTitle } from "@/lib/sources";
 import type { TitleWithStats } from "@/lib/titles";
 import { Card, EmptyState, HostChip, ProgressBar, StatusPill, episodeLabel, formatAgo, formatBytes, type PillState } from "../_kit";
 import { siteOf, type EpisodeRow, type FileView } from "../_data/progress";
-import { rescanTitle, retryExtractions } from "../titles/actions";
+import { redownloadEpisode, rescanTitle, retryExtractions } from "../titles/actions";
+import { DeleteFileButton } from "./delete-file-button";
 import { SourceActions } from "./source-actions";
 import { EpisodePill, PathText, SourceDot, sourceTone } from "./ui";
 import { hostLabelOf } from "./host-label";
@@ -39,6 +41,24 @@ const baseName = (p: string) => p.slice(p.lastIndexOf("/") + 1);
 /** Grid row shared by the episode and file lists: stacks on phones, columns from 860px. */
 const ROW = "grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-2 px-4 py-3 md:grid-cols-[44px_minmax(0,1fr)_170px_110px_80px] md:items-center md:gap-4 md:px-5";
 const HEAD = "hidden border-b border-border bg-surface-2 px-5 py-2.5 text-xs font-medium text-muted md:grid md:grid-cols-[44px_minmax(0,1fr)_170px_110px_80px] md:gap-4";
+
+/** "Download again" for an episode (or movie) deleted through Riparr. */
+function RedownloadForm({ titleId, season, episode }: { titleId: number; season: number | null; episode: number | null }) {
+  return (
+    <form action={redownloadEpisode} className="mt-1.5">
+      <input type="hidden" name="id" value={titleId} />
+      <input type="hidden" name="season" value={season ?? ""} />
+      <input type="hidden" name="episode" value={episode ?? ""} />
+      <button className="btn h-8 min-h-0 px-2.5 text-xs">
+        <RotateCw size={13} strokeWidth={1.75} aria-hidden="true" />
+        Download again
+      </button>
+    </form>
+  );
+}
+
+/** Host and size only mean something for a copy that's in the folder or on its way. */
+const GONE = new Set<FileView["state"]>(["removed", "missing"]);
 
 function FileLine({ file, missingText }: { file: FileView | null; missingText: string }) {
   if (!file) return <div className="text-xs text-faint">{missingText}</div>;
@@ -118,17 +138,22 @@ export function EpisodesPanel({ title, rows, extras, now }: { title: TitleWithSt
                     ) : (
                       <FileLine file={e.file} missingText={missingText(e.unsupported)} />
                     )}
-                    {e.disk && <div className="mt-1 text-xs text-faint">Already in the folder; Riparr won&apos;t download it</div>}
-                    {!e.disk && <Copies copies={e.copies} shown={e.file} />}
+                    {e.disk && <div className="mt-1 text-xs text-faint">In the folder, not downloaded by Riparr</div>}
+                    {!e.disk && e.state !== "removed" && <Copies copies={e.copies} shown={e.file} />}
+                    {e.state === "removed" && <RedownloadForm titleId={title.id} season={e.season} episode={e.episode} />}
                   </div>
                   <div>
                     {e.disk ? <EpisodePill state="done" inFolder now={now} /> : <FilePill file={e.file} type="show" now={now} />}
                   </div>
                   <div className="justify-self-end md:justify-self-start">
-                    {e.file ? <HostChip host={e.file.host} /> : <span className="text-xs text-faint">{e.disk ? "Folder" : "None"}</span>}
+                    {e.file && !GONE.has(e.state) ? (
+                      <HostChip host={e.file.host} />
+                    ) : (
+                      <span className="text-xs text-faint">{e.disk ? "Folder" : "None"}</span>
+                    )}
                   </div>
                   <div className="col-span-2 text-xs tabular-nums text-muted md:col-span-1 md:text-right md:text-[13px] md:text-fg-2">
-                    {e.file?.size || e.disk ? formatBytes(e.file?.size ?? e.disk!.size) : <span className="text-faint">–</span>}
+                    {e.disk ? formatBytes(e.disk.size) : e.file?.size && !GONE.has(e.state) ? formatBytes(e.file.size) : <span className="text-faint">–</span>}
                   </div>
                 </li>
               ))}
@@ -136,13 +161,14 @@ export function EpisodesPanel({ title, rows, extras, now }: { title: TitleWithSt
           </Card>
         );
       })}
-      {extras.length > 0 && <FilesCard title={title.type === "movie" ? "Download" : "Other files"} files={extras} type={title.type} now={now} />}
+      {extras.length > 0 && <FilesCard titleId={title.id} title={title.type === "movie" ? "Download" : "Other files"} files={extras} type={title.type} now={now} />}
     </div>
   );
 }
 
 /** Files without an episode number: a movie's files, or packs and extras of a show. */
-export function FilesCard({ title, files, type, now }: { title: string; files: FileView[]; type: TitleWithStats["type"]; now: number }) {
+export function FilesCard({ titleId, title, files, type, now }: { titleId: number; title: string; files: FileView[]; type: TitleWithStats["type"]; now: number }) {
+  const removed = type === "movie" && files.some((f) => f.state === "removed") && !files.some((f) => f.state === "done");
   const onDisk = files.filter((f) => f.state === "done");
   const bytes = onDisk.reduce((n, f) => n + (f.size ?? 0), 0);
   return (
@@ -175,6 +201,12 @@ export function FilesCard({ title, files, type, now }: { title: string; files: F
           </li>
         ))}
       </ul>
+      {removed && (
+        <div className="border-t border-border px-4 py-3 md:px-5">
+          <p className="text-[13px] text-muted">Deleted from the folder; Riparr won&apos;t download it again unless you ask.</p>
+          <RedownloadForm titleId={titleId} season={null} episode={null} />
+        </div>
+      )}
     </Card>
   );
 }
@@ -300,62 +332,23 @@ export function FilesPanel({
 }: {
   title: TitleWithStats;
   files: FileView[];
-  /** Video files already in the folder that Riparr didn't download. */
+  /** Every video file in the folder, by the last scan: the one record of what's on disk. */
   disk: DiskFile[];
   archives: ExtractionRow[];
   freeBytes: number | null;
   now: number;
 }) {
-  const onDisk = files.filter((f) => f.state === "done" && f.local_path).sort((a, b) => (a.local_path! < b.local_path! ? -1 : 1));
-  const listed = new Set(onDisk.map((f) => f.local_path));
-  const inFolder = disk.filter((d) => !listed.has(d.path));
-  const bytes = onDisk.reduce((n, f) => n + (f.size ?? f.bytes_done), 0);
+  // Riparr's download behind each file, for its host.
+  const owner = new Map(files.filter((f) => f.status === "done" && f.local_path).map((f) => [f.local_path!, f]));
+  const rows = [...disk].sort((a, b) => (a.path < b.path ? -1 : 1));
+  const bytes = rows.reduce((n, d) => n + d.size, 0);
   const dir = `${title.root_path}/${title.folder}`;
   const failed = archives.some((a) => a.status === "failed" || a.status === "wrong_password");
+  const COLS = "md:grid-cols-[minmax(0,1fr)_70px_110px_80px_90px_40px]";
   return (
     <div className="space-y-3.5">
-      <Card title="Files on disk" action={<PathText icon={FolderOpen}>{dir}</PathText>} bodyClassName="">
-        {onDisk.length === 0 ? (
-          <EmptyState icon={FolderOpen} title="No files yet" body={`Files appear here once a download finishes and is moved into ${dir}.`} />
-        ) : (
-          <>
-            <div className="hidden border-b border-border bg-surface-2 px-5 py-2.5 text-xs font-medium text-muted md:grid md:grid-cols-[minmax(0,1fr)_110px_80px_90px] md:gap-4" aria-hidden="true">
-              <span>Path</span>
-              <span>Host</span>
-              <span className="text-right">Size</span>
-              <span>Added</span>
-            </div>
-            <ul className="divide-y divide-border">
-              {onDisk.map((f) => (
-                <li
-                  key={f.file_id}
-                  className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1.5 px-4 py-3 md:grid-cols-[minmax(0,1fr)_110px_80px_90px] md:items-center md:gap-4 md:px-5"
-                >
-                  <span className="col-span-2 font-mono text-xs text-fg-2 [overflow-wrap:anywhere] md:col-span-1">{f.local_path}</span>
-                  <span>
-                    <HostChip host={f.host} />
-                  </span>
-                  <span className="justify-self-end text-xs tabular-nums text-muted md:text-right md:text-[13px] md:text-fg-2">{formatBytes(f.size ?? f.bytes_done)}</span>
-                  <span className="hidden text-xs tabular-nums text-muted md:block">{formatAgo(f.updated_at, now)}</span>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-        <div className="flex flex-wrap justify-between gap-3 rounded-b-md border-t border-border bg-surface-2 px-4 py-3 text-[13px] tabular-nums text-muted md:px-5">
-          <span>
-            {onDisk.length} {onDisk.length === 1 ? "file" : "files"} · {formatBytes(bytes)}
-          </span>
-          {freeBytes != null && (
-            <span>
-              {formatBytes(freeBytes)} free on {title.root_path}
-            </span>
-          )}
-        </div>
-      </Card>
-
       <Card
-        title="Already in the folder"
+        title="Files in the folder"
         action={
           <form action={rescanTitle}>
             <input type="hidden" name="id" value={title.id} />
@@ -367,22 +360,55 @@ export function FilesPanel({
         }
         bodyClassName=""
       >
-        <p className="px-4 py-3 text-[13px] text-muted md:px-5">
-          Video files Riparr didn&apos;t download, e.g. episodes you had before adding the title. They count as on disk, so Riparr
-          doesn&apos;t download them again.{" "}
-          {title.disk_scanned_at ? `Last scanned ${formatAgo(title.disk_scanned_at, now)}.` : "Not scanned yet."}
-        </p>
-        {inFolder.length > 0 && (
-          <ul className="divide-y divide-border border-t border-border">
-            {inFolder.map((d) => (
-              <li key={d.path} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-4 py-3 md:grid-cols-[minmax(0,1fr)_110px_80px] md:items-center md:gap-4 md:px-5">
-                <span className="col-span-2 font-mono text-xs text-fg-2 [overflow-wrap:anywhere] md:col-span-1">{d.path}</span>
-                <span className="text-xs tabular-nums text-muted">{d.episode != null ? episodeLabel(d.season ?? 1, d.episode) : ""}</span>
-                <span className="justify-self-end text-xs tabular-nums text-muted md:text-right md:text-[13px] md:text-fg-2">{formatBytes(d.size)}</span>
-              </li>
-            ))}
-          </ul>
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 py-3 text-[13px] text-muted md:px-5">
+          <PathText icon={FolderOpen}>{dir}</PathText>
+          <span>{title.disk_scanned_at ? `Scanned ${formatAgo(title.disk_scanned_at, now)}` : "Not scanned yet"}</span>
+        </div>
+        {rows.length === 0 ? (
+          <div className="border-t border-border">
+            <EmptyState
+              icon={FolderOpen}
+              title="No video files"
+              body={`Downloads appear here once they're moved into ${dir}. Video files you add there yourself count too; rescan to pick them up.`}
+            />
+          </div>
+        ) : (
+          <>
+            <div className={`hidden border-y border-border bg-surface-2 px-5 py-2.5 text-xs font-medium text-muted md:grid ${COLS} md:gap-4`} aria-hidden="true">
+              <span>Path</span>
+              <span>Episode</span>
+              <span>From</span>
+              <span className="text-right">Size</span>
+              <span>Modified</span>
+              <span />
+            </div>
+            <ul className="divide-y divide-border border-t border-border md:border-t-0">
+              {rows.map((d) => {
+                const own = owner.get(d.path);
+                return (
+                  <li key={d.path} className={`grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1.5 px-4 py-3 ${COLS} md:items-center md:gap-4 md:px-5`}>
+                    <span className="col-span-2 font-mono text-xs text-fg-2 [overflow-wrap:anywhere] md:col-span-1">{d.path.slice(dir.length + 1) || d.path}</span>
+                    <span className="text-xs tabular-nums text-muted">{d.episode != null ? episodeLabel(d.season ?? 1, d.episode) : ""}</span>
+                    <span>{own ? <HostChip host={own.host} /> : <span className="text-xs text-faint">Added by hand</span>}</span>
+                    <span className="justify-self-end text-xs tabular-nums text-muted md:text-right md:text-[13px] md:text-fg-2">{formatBytes(d.size)}</span>
+                    <span className="hidden text-xs tabular-nums text-muted md:block">{formatAgo(d.mtime, now)}</span>
+                    <DeleteFileButton titleId={title.id} path={d.path} name={path.basename(d.path)} />
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         )}
+        <div className="flex flex-wrap justify-between gap-3 rounded-b-md border-t border-border bg-surface-2 px-4 py-3 text-[13px] tabular-nums text-muted md:px-5">
+          <span>
+            {rows.length} {rows.length === 1 ? "file" : "files"} · {formatBytes(bytes)}
+          </span>
+          {freeBytes != null && (
+            <span>
+              {formatBytes(freeBytes)} free on {title.root_path}
+            </span>
+          )}
+        </div>
       </Card>
 
       {archives.length > 0 && (

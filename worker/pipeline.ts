@@ -3,7 +3,7 @@ import PQueue from "p-queue";
 import { downloadFile } from "@/lib/download";
 import { HostOfflineError, NeedsAttentionError, RateLimitError, StallError } from "@/lib/errors";
 import type { ActivityData } from "@/lib/activity";
-import { logDebug, logEvent } from "@/lib/events";
+import { logDebug, logEvent, logThrottled } from "@/lib/events";
 import { dateTime } from "@/lib/time";
 import { hostAccount } from "@/lib/host-accounts";
 import {
@@ -21,6 +21,8 @@ import {
   recordHostOk,
 } from "@/lib/host-status";
 import { findResolver } from "@/lib/hosts";
+import { StaleSaltError } from "@/lib/hosts/gofile";
+import { autoRefreshSalt } from "@/lib/hosts/gofile-salt";
 import type { RemoteFile } from "@/lib/hosts/types";
 import {
   titleFiles,
@@ -33,6 +35,7 @@ import {
   markResolved,
   parkLinkFiles,
   resolvingInProgress,
+  requeueSettledLinks,
   setFileStatuses,
   setLinkStatus,
   unresolvedLinks,
@@ -43,7 +46,7 @@ import {
   type TitleFile,
 } from "@/lib/links";
 import { coveredByDisk, groupMirrors, mirrorNameKey, planMirrors } from "@/lib/mirrors";
-import { externalDiskFiles, scanTitle } from "@/lib/disk-scan";
+import { externalDiskFiles, recordDownload, scanTitle } from "@/lib/disk-scan";
 import { describeNetworkError, fetchFor, proxyUrlSetting } from "@/lib/net";
 import { notify } from "@/lib/notify";
 import { parseEpisode } from "@/lib/episodes";
@@ -162,6 +165,9 @@ export function selectAndSettle(titleId: number, now = clock.now()) {
   }
   const plan = planMirrors(files, priority, now);
   setFileStatuses(plan.promote, "queued");
+  // A promoted copy may sit on a link that settled earlier (done, or not needed as a mirror), e.g.
+  // when a file deleted from the folder is fetched again: only queued links are downloaded.
+  requeueSettledLinks(plan.promote);
   setFileStatuses(plan.standby, "standby");
   if (plan.promote.length || plan.standby.length) {
     logDebug("mirror", () => {
@@ -277,13 +283,26 @@ function stillWanted(link: Link) {
 async function resolveFiles(link: Link, title: TitleWithStats, signal: AbortSignal) {
   const resolver = findResolver(link.url);
   if (!resolver) throw new UnsupportedHostError(`No resolver for ${link.host}`);
-  const remote = await resolver.resolve(new URL(link.url), {
-    account: hostAccount(resolver.id),
-    // Folder passwords: the source that listed the link first, then any of the title's.
-    password: (link.source_id ? getSource(link.source_id)?.password : null) ?? titlePasswords(title.id)[0] ?? null,
-    signal,
-    fetch: fetchFor("host"),
-  });
+  const resolve = () =>
+    resolver.resolve(new URL(link.url), {
+      account: hostAccount(resolver.id),
+      // Folder passwords: the source that listed the link first, then any of the title's.
+      password: (link.source_id ? getSource(link.source_id)?.password : null) ?? titlePasswords(title.id)[0] ?? null,
+      signal,
+      fetch: fetchFor("host"),
+    });
+  let remote: Awaited<ReturnType<typeof resolve>>;
+  try {
+    remote = await resolve();
+  } catch (e) {
+    if (!(e instanceof StaleSaltError)) throw e;
+    // Opt-in: fetch gofile's current salt once in a while and retry with it.
+    if (!(await autoRefreshSalt())) {
+      logThrottled("gofile-salt", 6 * 60 * 60 * 1000, "warn", "gofile rejects the website token; refresh its salt in Settings → Hosts", null, "host");
+      throw e;
+    }
+    remote = await resolve();
+  }
   if (remote.length === 0) throw new HostOfflineError("Link resolved to no files");
   const rows = upsertFiles(
     link.id,
@@ -409,6 +428,8 @@ async function downloadOne(title: TitleWithStats, link: Link, row: FileRow, file
       bytes_done: file.size ?? ("bytes" in result ? result.bytes : 0),
       stalls: 0,
     });
+    // On disk now: the views count it without waiting for the next folder scan.
+    recordDownload(link.title_id, result.path);
     recordHostOk(link.host);
     logDebug("download", () => {
       if (result.status === "skipped") return `Skipped ${file.name}: an identical file is already at ${result.path}`;

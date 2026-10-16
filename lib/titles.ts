@@ -1,6 +1,7 @@
 import path from "node:path";
 import { z } from "zod";
 import { all, one, run } from "./db";
+import { isVideoSql } from "./video";
 import { normalizeTargetDir, renderTemplate, resolveInside, sanitizeSegment } from "./paths";
 
 export type TitleType = "show" | "movie";
@@ -95,10 +96,11 @@ const STATS = `
          (SELECT COUNT(*) FROM links l WHERE l.title_id = t.id) AS link_count,
          (SELECT COUNT(*) FROM links l WHERE l.title_id = t.id AND l.status = 'done') AS done_count,
          (SELECT COUNT(*) FROM (
-            SELECT COALESCE(f.season, 1) AS s, f.episode AS e FROM files f JOIN links l ON l.id = f.link_id
-             WHERE l.title_id = t.id AND f.episode IS NOT NULL AND f.status IN ('done', 'skipped')
+            SELECT COALESCE(d.season, 1) AS s, d.episode AS e FROM disk_files d WHERE d.title_id = t.id AND d.episode IS NOT NULL
             UNION
-            SELECT COALESCE(d.season, 1), d.episode FROM disk_files d WHERE d.title_id = t.id AND d.episode IS NOT NULL
+            -- Archives aren't scanned (they're usually deleted once extracted): a finished one still counts.
+            SELECT COALESCE(f.season, 1), f.episode FROM files f JOIN links l ON l.id = f.link_id
+             WHERE l.title_id = t.id AND f.episode IS NOT NULL AND f.status = 'done' AND NOT ${isVideoSql("f.local_path")}
           )) AS episodes_done,
          (SELECT COUNT(DISTINCT f.season || 'x' || f.episode) FROM files f JOIN links l ON l.id = f.link_id
            WHERE l.title_id = t.id AND f.episode IS NOT NULL) AS episodes_seen,

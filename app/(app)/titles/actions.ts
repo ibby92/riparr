@@ -12,6 +12,8 @@ import { getSettings } from "@/lib/settings";
 import { createTmdbClient } from "@/lib/tmdb";
 import type { FormState } from "./_add/types";
 import { sendCommand } from "@/lib/commands";
+import { describeScan, syncFolder } from "@/lib/disk-scan";
+import { deleteTitleFile, restoreEpisode } from "@/lib/file-delete";
 import { decryptDlc, dlcLinks } from "@/lib/crawlers";
 import { logDebug, logEvent } from "@/lib/events";
 import { addLinks, getLink, requeueLink, setLinkStatus } from "@/lib/links";
@@ -299,10 +301,49 @@ export async function checkTitleNow(formData: FormData) {
   refresh();
 }
 
-/** Looks for episodes added to the title's folder by hand. */
+/** Deletes one video file from the title's folder; optionally queues the episode for download again. */
+export async function deleteFile(formData: FormData) {
+  await requireSession();
+  const id = parseId(formData.get("id"));
+  const redownload = formData.get("redownload") === "on";
+  const result = deleteTitleFile(id, String(formData.get("path") ?? ""), redownload);
+  if (result.ok) {
+    const again = !redownload ? "; it won't be downloaded again" : result.requeued ? "; downloading it again" : "; no source lists it to download again";
+    logEvent("info", `Deleted ${result.file.name} from the folder${again}`, id, "disk", {
+      kind: "file_deleted",
+      data: { files: [result.file], redownload: redownload && result.requeued > 0 },
+    });
+  } else {
+    logEvent("warn", `Couldn't delete a file: ${result.error}`, id, "disk");
+  }
+  refresh();
+}
+
+/** Queues an episode (or movie) that was deleted through Riparr for download again. */
+export async function redownloadEpisode(formData: FormData) {
+  await requireSession();
+  const id = parseId(formData.get("id"));
+  const num = (v: FormDataEntryValue | null) => (v === null || v === "" ? null : Number(v));
+  const season = num(formData.get("season"));
+  const episode = num(formData.get("episode"));
+  const queued = restoreEpisode(id, season, episode);
+  if (queued) {
+    const what = episode != null ? `S${String(season ?? 1).padStart(2, "0")}E${String(episode).padStart(2, "0")}` : "the movie";
+    logEvent("info", `Downloading ${what} again`, id, "disk", {
+      kind: "file_requeued",
+      data: { files: [{ name: what, season, episode, size: null }], redownload: true },
+    });
+  }
+  refresh();
+}
+
+/** Rescans the title's folder now and brings Riparr's records in line with what's there. */
 export async function rescanTitle(formData: FormData) {
   await requireSession();
-  sendCommand({ type: "scan_title", titleId: parseId(formData.get("id")), manual: true });
+  const id = parseId(formData.get("id"));
+  const result = syncFolder(id);
+  if (result) logEvent("info", `Rescanned the folder: ${describeScan(id, result.files)}`, id, "scan");
+  else logEvent("warn", "Couldn't rescan the folder: its root folder isn't reachable", id, "scan");
   refresh();
 }
 

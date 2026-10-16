@@ -74,6 +74,8 @@ export type FileRow = {
   stalls: number;
   /** When the user was told no working copy of this file is left; null if never. */
   blocked_notified_at: number | null;
+  /** When the user deleted this file from the folder and chose not to download it again (status 'skipped'). */
+  removed_at: number | null;
 };
 
 /**
@@ -282,6 +284,17 @@ export function setFileStatuses(ids: number[], status: FileStatus) {
     status,
     Date.now(),
     ...ids,
+  );
+}
+
+/** Queues the settled (done or mirror) links of these files again, so their queued files download. */
+export function requeueSettledLinks(fileIds: number[]) {
+  if (fileIds.length === 0) return;
+  run(
+    `UPDATE links SET status = 'queued', error = NULL, attempts = 0, retry_at = NULL, updated_at = ?
+      WHERE status IN ('done', 'mirror') AND id IN (SELECT link_id FROM files WHERE id IN (${fileIds.map(() => "?").join(",")}))`,
+    Date.now(),
+    ...fileIds,
   );
 }
 

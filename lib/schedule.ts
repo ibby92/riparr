@@ -6,6 +6,7 @@ import { fetchFor } from "./net";
 import { getSettings } from "./settings";
 import { createTmdbClient, type TmdbClient } from "./tmdb";
 import { localDay } from "./time";
+import { isVideoSql } from "./video";
 
 const HOUR = 60 * 60 * 1000;
 /** How often a title's schedule is re-read from TMDB. */
@@ -137,8 +138,8 @@ export function scheduleBetween(from: string, to: string, today: string): Schedu
     `SELECT e.title_id, t.name AS title_name, t.type AS title_type, t.year, t.monitored,
             (t.tmdb_id IS NOT NULL AND t.poster_path IS NOT NULL) AS has_poster,
             e.season, e.episode, e.name, e.air_date AS date,
-            (${FILE_STATE("f.status IN ('done', 'skipped')")}
-              OR EXISTS (SELECT 1 FROM disk_files d WHERE d.title_id = e.title_id AND COALESCE(d.season, 1) = e.season AND d.episode = e.episode)) AS on_disk,
+            (EXISTS (SELECT 1 FROM disk_files d WHERE d.title_id = e.title_id AND COALESCE(d.season, 1) = e.season AND d.episode = e.episode)
+              OR ${FILE_STATE(`f.status = 'done' AND NOT ${isVideoSql("f.local_path")}`)}) AS on_disk,
             ${FILE_STATE("f.status = 'downloading'")} AS downloading,
             ${FILE_STATE("f.status IN ('queued', 'standby') AND l.status IN ('new', 'queued', 'resolving', 'downloading')")} AS queued
        FROM episodes e JOIN titles t ON t.id = e.title_id
@@ -151,8 +152,7 @@ export function scheduleBetween(from: string, to: string, today: string): Schedu
     `SELECT t.id AS title_id, t.name AS title_name, t.type AS title_type, t.year, t.monitored,
             (t.tmdb_id IS NOT NULL AND t.poster_path IS NOT NULL) AS has_poster,
             NULL AS season, NULL AS episode, NULL AS name, t.release_date AS date,
-            (EXISTS (SELECT 1 FROM files f JOIN links l ON l.id = f.link_id WHERE l.title_id = t.id AND f.status IN ('done', 'skipped'))
-              OR EXISTS (SELECT 1 FROM disk_files d WHERE d.title_id = t.id)) AS on_disk,
+            EXISTS (SELECT 1 FROM disk_files d WHERE d.title_id = t.id) AS on_disk,
             EXISTS (SELECT 1 FROM files f JOIN links l ON l.id = f.link_id WHERE l.title_id = t.id AND f.status = 'downloading') AS downloading,
             EXISTS (SELECT 1 FROM links l WHERE l.title_id = t.id AND l.status IN ('new', 'queued', 'resolving')) AS queued
        FROM titles t

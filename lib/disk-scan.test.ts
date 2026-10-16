@@ -8,10 +8,10 @@ process.env.RIPARR_CONFIG_DIR = path.join(tmp, "config");
 const media = path.join(tmp, "media");
 fs.mkdirSync(media, { recursive: true });
 
-const { closeDb, run } = await import("./db");
+const { all, closeDb, one, run } = await import("./db");
 const { addRootFolder } = await import("./root-folders");
 const { createTitle, getTitle, titleInput } = await import("./titles");
-const { diskEpisode, externalDiskFiles, scanTitle, staleScans } = await import("./disk-scan");
+const { diskEpisode, externalDiskFiles, recordDownload, requeueMissingDownloads, scanTitle, staleScans, syncFolder } = await import("./disk-scan");
 
 afterAll(() => {
   closeDb();
@@ -34,6 +34,63 @@ describe("diskEpisode", () => {
     expect(diskEpisode("/m/Show/Season 03/Show.S01E01.mkv", "show")).toEqual({ season: 1, episode: 1 });
     expect(diskEpisode("/m/Show/trailer.mkv", "show")).toEqual({ season: null, episode: null });
     expect(diskEpisode("/m/Movie (2019)/Movie.S01E01.mkv", "movie")).toEqual({ season: null, episode: null });
+  });
+});
+
+describe("requeueMissingDownloads", () => {
+  it("re-queues finished downloads whose video was deleted, but not covered, archived or unreachable ones", () => {
+    const id = title("show", "Deleted Files");
+    put("Deleted Files/Del.S01E01.mkv");
+    put("Deleted Files/Del.S01E03.mkv"); // E02 was moved and renamed, E03's original is covered by this
+    const f = (name: string) => path.join(media, "Deleted Files", name);
+    run("INSERT INTO links (id, title_id, url, fingerprint, host, status, discovered_at) VALUES (910, ?, 'u', 'fp910', 'gofile', 'done', 1)", id);
+    const add = (key: string, name: string, season: number, episode: number | null, local: string) =>
+      run("INSERT INTO files (link_id, key, remote_name, status, local_path, season, episode, updated_at) VALUES (910, ?, ?, 'done', ?, ?, ?, 1)", key, name, local, season, episode);
+    add("a", "Del.S01E01.mkv", 1, 1, f("Del.S01E01.mkv")); // still there
+    add("b", "Del.S01E02.mkv", 1, 2, f("Del.S01E02.mkv")); // deleted
+    add("c", "Del.S01E03.mkv", 1, 3, f("old/Del.S01E03.mkv")); // path gone, episode present elsewhere
+    add("d", "Del.part1.rar", 1, null, f("Del.part1.rar")); // archive, left alone
+    scanTitle(id);
+
+    expect(requeueMissingDownloads(id)).toEqual([{ name: "Del.S01E02.mkv", season: 1, episode: 2, size: null }]);
+    expect(all<{ key: string; status: string; local_path: string | null }>("SELECT key, status, local_path FROM files WHERE link_id = 910 ORDER BY key")).toEqual([
+      { key: "a", status: "done", local_path: f("Del.S01E01.mkv") },
+      { key: "b", status: "standby", local_path: null },
+      { key: "c", status: "done", local_path: f("old/Del.S01E03.mkv") },
+      { key: "d", status: "done", local_path: f("Del.part1.rar") },
+    ]);
+    expect(one<{ status: string }>("SELECT status FROM links WHERE id = 910")!.status).toBe("queued");
+    expect(requeueMissingDownloads(id)).toEqual([]);
+  });
+});
+
+describe("syncFolder", () => {
+  it("rescans and re-queues downloads deleted by hand, logging them for History", () => {
+    const id = title("show", "Sync Files");
+    put("Sync Files/Sync.S01E01.mkv");
+    const f = path.join(media, "Sync Files", "Sync.S01E01.mkv");
+    run("INSERT INTO links (id, title_id, url, fingerprint, host, status, discovered_at) VALUES (920, ?, 'u', 'fp920', 'gofile', 'done', 1)", id);
+    run("INSERT INTO files (link_id, key, remote_name, status, local_path, season, episode, size, updated_at) VALUES (920, 'a', 'Sync.S01E01.mkv', 'done', ?, 1, 1, 5, 1)", f);
+    expect(syncFolder(id)).toMatchObject({ files: [{ path: f }], requeued: [] });
+
+    fs.rmSync(f);
+    expect(syncFolder(id)).toMatchObject({ files: [], requeued: [{ name: "Sync.S01E01.mkv", episode: 1 }] });
+    expect(one<{ status: string; local_path: string | null }>("SELECT status, local_path FROM files WHERE link_id = 920")).toEqual({ status: "standby", local_path: null });
+    expect(one<{ activity: string }>("SELECT activity FROM events WHERE title_id = ? ORDER BY id DESC LIMIT 1", id)!.activity).toBe("files_missing");
+  });
+});
+
+describe("recordDownload", () => {
+  it("adds a finished download to the scan results straight away, but only videos inside the title folder", () => {
+    const id = title("show", "Fresh Files");
+    put("Fresh Files/Season 01/Fresh.E04.mkv");
+    put("Fresh Files/Fresh.part1.rar");
+    recordDownload(id, path.join(media, "Fresh Files", "Season 01", "Fresh.E04.mkv"));
+    recordDownload(id, path.join(media, "Fresh Files", "Fresh.part1.rar"));
+    recordDownload(id, path.join(media, "Elsewhere.S01E01.mkv"));
+    expect(all<{ path: string; season: number; episode: number }>("SELECT path, season, episode FROM disk_files WHERE title_id = ?", id)).toEqual([
+      { path: path.join(media, "Fresh Files", "Season 01", "Fresh.E04.mkv"), season: 1, episode: 4 },
+    ]);
   });
 });
 

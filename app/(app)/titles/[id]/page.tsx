@@ -9,7 +9,7 @@ import { listRootFolders } from "@/lib/root-folders";
 import { listSources } from "@/lib/sources";
 import { getTitle } from "@/lib/titles";
 import { Card, EmptyState, Poster, StatusPill, Tag, formatBytes } from "../../_kit";
-import { episodeExtras, episodeRows, hostLimits, summarize, titleFileViews } from "../../_data/progress";
+import { diskFiles, episodeExtras, episodeRows, hostLimits, summarize, titleFileViews } from "../../_data/progress";
 import { AddSourceForm } from "../../_library/add-source-form";
 import { LinksList } from "../../_library/links-list";
 import { TitleSkeleton } from "../../_library/skeletons";
@@ -60,8 +60,8 @@ async function TitleDetail({
   const extras = files.filter((f) => (isShow ? f.episode == null : true) && f.state !== "standby");
   const archives = listExtractions(title.id);
   const { events } = historyEvents({ titleId: title.id, period: "all" }, now, 200);
-  const onDiskPaths = new Set(files.filter((f) => f.state === "done" && f.local_path).map((f) => f.local_path));
-  const onDisk = onDiskPaths.size + known.disk.filter((d) => !onDiskPaths.has(d.path)).length;
+  // What's in the folder, by the last scan: the Files tab and its count.
+  const inFolder = diskFiles(title.id);
   const busy = links.some((l) => l.status === "resolving" || l.status === "downloading");
   const pill = titlePill(title.status, title.type, progress);
   const reason = title.archived_at !== null ? null : titleReason(title, progress, now);
@@ -216,7 +216,7 @@ async function TitleDetail({
         items={[
           { href: base, label: isShow ? "Episodes" : "Download", active: tab === "episodes", count: isShow ? rows.length : undefined },
           { href: `${base}?tab=sources`, label: "Sources", active: tab === "sources", count: sources.length },
-          { href: `${base}?tab=files`, label: "Files", active: tab === "files", count: onDisk },
+          { href: `${base}?tab=files`, label: "Files", active: tab === "files", count: inFolder.length },
           { href: `${base}?tab=history`, label: "History", active: tab === "history", count: events.length },
         ]}
       />
@@ -226,11 +226,11 @@ async function TitleDetail({
           {isShow ? (
             <EpisodesPanel title={title} rows={rows} extras={extras} now={now} />
           ) : extras.length ? (
-            <FilesCard title="Download" files={extras} type="movie" now={now} />
+            <FilesCard titleId={title.id} title="Download" files={extras} type="movie" now={now} />
           ) : known.disk.length ? (
             <Card title="Download">
               <p className="text-sm text-fg-2">
-                Already in the folder, so Riparr won&apos;t download it:{" "}
+                In the folder, so Riparr won&apos;t download it:{" "}
                 <span className="font-mono text-xs [overflow-wrap:anywhere]">{known.disk.map((d) => d.path.slice(d.path.lastIndexOf("/") + 1)).join(", ")}</span>
               </p>
             </Card>
@@ -272,7 +272,7 @@ async function TitleDetail({
         </div>
       )}
 
-      {tab === "files" && <FilesPanel title={title} files={files} disk={known.disk} archives={archives} freeBytes={freeBytes} now={now} />}
+      {tab === "files" && <FilesPanel title={title} files={files} disk={inFolder} archives={archives} freeBytes={freeBytes} now={now} />}
 
       {tab === "history" &&
         (events.length ? (

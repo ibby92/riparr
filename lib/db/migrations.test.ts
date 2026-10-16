@@ -249,3 +249,28 @@ describe("migration 14 (calendar)", () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM episodes").get()).toEqual({ n: 0 });
   });
 });
+
+describe("migration 15 (files deleted from the folder)", () => {
+  it("marks earlier deletes (skipped without a path) as removed and tags their log entries", () => {
+    const db = databaseAt(14);
+    db.exec(`
+      INSERT INTO root_folders (id, path, created_at) VALUES (1, '/srv/media', 1);
+      INSERT INTO titles (id, type, name, root_folder_id, folder, created_at, updated_at) VALUES (1, 'show', 'X', 1, 'X', 1, 1);
+      INSERT INTO links (id, title_id, url, fingerprint, host, status, discovered_at) VALUES (1, 1, 'u', 'fp', 'gofile', 'done', 1);
+      INSERT INTO files (id, link_id, key, remote_name, status, local_path, updated_at) VALUES
+        (1, 1, 'a', 'a.mkv', 'skipped', NULL, 50),
+        (2, 1, 'b', 'b.mkv', 'skipped', '/srv/media/X/b.mkv', 60),
+        (3, 1, 'c', 'c.mkv', 'done', '/srv/media/X/c.mkv', 70);
+      INSERT INTO events (at, level, title_id, component, message) VALUES
+        (1, 'info', 1, 'disk', 'Deleted a.mkv from the folder'),
+        (2, 'info', 1, 'scan', 'Rescanned the folder');
+    `);
+    migrate(db);
+    expect(db.prepare("SELECT id, removed_at FROM files ORDER BY id").all().map((r) => ({ ...r }))).toEqual([
+      { id: 1, removed_at: 50 },
+      { id: 2, removed_at: null },
+      { id: 3, removed_at: null },
+    ]);
+    expect(db.prepare("SELECT activity FROM events ORDER BY id").all().map((r) => r.activity)).toEqual(["file_deleted", null]);
+  });
+});

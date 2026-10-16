@@ -1,14 +1,17 @@
-// Finds video files already in a title's folder: episodes the user had before
-// adding the title, or put there by hand. Riparr counts them as on disk and
-// doesn't download those episodes again.
+// The folder is the source of truth for what's on disk. A scan records every video file in a
+// title's folder (disk_files): Riparr's downloads, episodes the user had before adding the
+// title, or put there by hand. Every view counts an episode as on disk only through these rows,
+// and syncFolder() brings the rest of the database in line with them.
 import fs from "node:fs";
 import path from "node:path";
 import { all, getDb, one, run } from "./db";
-import { logDebug } from "./events";
+import { logDebug, logEvent } from "./events";
 import { parseEpisode } from "./episodes";
 import { getTitle, type TitleType } from "./titles";
+import { isVideo, VIDEO_EXTENSIONS } from "./video";
 
-export const VIDEO_EXTENSIONS = /\.(mkv|mp4|m4v|avi|mov|wmv|ts|m2ts|webm|flv|mpg|mpeg)$/i;
+export { isVideo, isVideoSql, VIDEO_EXTENSIONS } from "./video";
+
 /** Seasons, extras and similar sub-folders are scanned; deeper trees are not. */
 const MAX_DEPTH = 3;
 
@@ -93,10 +96,191 @@ export function scanTitle(titleId: number, now = Date.now()): DiskFile[] | null 
   return files;
 }
 
+/** A file named in an activity entry (History). */
+export type MissingFile = { name: string; season: number | null; episode: number | null; size: number | null };
+
+const nameKey = (name: string) => name.normalize("NFC").trim().toLowerCase();
+
+/** The last path segment of a link, decoded: a file name for direct links. */
+function urlName(url: string): string | null {
+  try {
+    const last = new URL(url).pathname.split("/").filter(Boolean).at(-1);
+    return last ? decodeURIComponent(last) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Files in the title's folder that Riparr didn't download itself: no file row
- * of the title points at them. These are what makes an episode count as
- * already on disk (Riparr's own downloads are tracked by their file rows).
+ * Dead links (failed or offline) holding the episodes of these files are resolved again: a host
+ * that failed the first time (say gofile with a stale token) may work now, and host priority
+ * should decide again. Mirror selection waits while they resolve; one that fails again just
+ * leaves the other copies to it. A link matches by episode or by file name, taken from its files,
+ * or from the source's details and its URL when it never got as far as listing them. For movies,
+ * every dead link counts.
+ * Returns how many links were revived.
+ */
+export function reviveDeadLinks(fileIds: number[], now = Date.now()): number {
+  if (fileIds.length === 0) return 0;
+  const wanted = all<{ title_id: number; type: TitleType; name: string; season: number | null; episode: number | null }>(
+    `SELECT DISTINCT l.title_id, t.type, f.remote_name AS name, f.season, f.episode FROM files f JOIN links l ON l.id = f.link_id JOIN titles t ON t.id = l.title_id
+      WHERE f.id IN (${fileIds.map(() => "?").join(",")})`,
+    ...fileIds,
+  );
+  const key = (season: number | null, episode: number | null) => `${season ?? 1}x${episode}`;
+  const revive: number[] = [];
+  for (const titleId of new Set(wanted.map((w) => w.title_id))) {
+    const mine = wanted.filter((w) => w.title_id === titleId);
+    const movie = mine[0].type === "movie";
+    const episodes = new Set(mine.filter((w) => w.episode != null).map((w) => key(w.season, w.episode)));
+    const names = new Set(mine.map((w) => nameKey(w.name)));
+    const dead = all<{ id: number; episode: string | null; label: string | null; url: string }>(
+      "SELECT id, episode, label, url FROM links WHERE title_id = ? AND status IN ('failed', 'offline')",
+      titleId,
+    );
+    for (const link of dead) {
+      if (movie) {
+        revive.push(link.id);
+        continue;
+      }
+      const own = all<{ name: string; season: number | null; episode: number | null }>(
+        "SELECT remote_name AS name, season, episode FROM files WHERE link_id = ?",
+        link.id,
+      );
+      const meta = parseEpisode(link.episode) ?? parseEpisode(link.label);
+      const eps = own.length
+        ? own.filter((f) => f.episode != null).map((f) => key(f.season, f.episode))
+        : meta
+          ? [key(meta.season, meta.episode)]
+          : [];
+      const linkNames = own.length ? own.map((f) => f.name) : [link.label, urlName(link.url)].filter((n): n is string => Boolean(n));
+      if (eps.some((e) => episodes.has(e)) || linkNames.some((n) => names.has(nameKey(n)))) revive.push(link.id);
+    }
+  }
+  if (revive.length === 0) return 0;
+  const ids = revive.map(() => "?").join(",");
+  run(
+    `UPDATE links SET status = 'new', resolved_at = NULL, error = NULL, attempts = 0, retry_at = NULL, updated_at = ? WHERE id IN (${ids})`,
+    now,
+    ...revive,
+  );
+  run(`UPDATE files SET status = 'standby', error = NULL, blocked_notified_at = NULL, updated_at = ? WHERE link_id IN (${ids}) AND status = 'failed'`, now, ...revive);
+  logDebug("download", () => `Trying ${revive.length} failed or offline link(s) again for the re-queued episode(s)`, wanted[0].title_id);
+  return revive.length;
+}
+
+/**
+ * Puts files back in line for download: on standby (mirror selection picks the copy to fetch)
+ * with their link queued again. Clears a deliberate removal. Links of the same episodes that
+ * failed or went offline earlier get another chance (see reviveDeadLinks).
+ */
+export function requeueFiles(fileIds: number[], now = Date.now()) {
+  if (fileIds.length === 0) return;
+  reviveDeadLinks(fileIds, now);
+  const ids = fileIds.map(() => "?").join(",");
+  const db = getDb();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    run(
+      `UPDATE files SET status = 'standby', local_path = NULL, removed_at = NULL, bytes_done = 0, speed_bps = 0, error = NULL,
+              attempts = 0, stalls = 0, blocked_notified_at = NULL, updated_at = ? WHERE id IN (${ids})`,
+      now,
+      ...fileIds,
+    );
+    run(
+      `UPDATE links SET status = 'queued', error = NULL, attempts = 0, retry_at = NULL, updated_at = ?
+        WHERE id IN (SELECT link_id FROM files WHERE id IN (${ids})) AND status IN ('done', 'mirror')`,
+      now,
+      ...fileIds,
+    );
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
+
+/**
+ * Riparr's own finished downloads whose video file has since vanished from the folder (deleted
+ * by hand) go back in the queue, so the episode is fetched again. Files are left alone when
+ * another file in the folder covers the same episode (moved or renamed), when the file isn't a
+ * video (archives are often deleted after extraction), when the user deleted it through Riparr
+ * and chose not to fetch it again, and when the title's root folder is unreachable. Returns the
+ * files re-queued. Call after `scanTitle`.
+ */
+export function requeueMissingDownloads(titleId: number): MissingFile[] {
+  const title = getTitle(titleId);
+  if (!title || !fs.existsSync(title.root_path)) return [];
+  const disk = all<DiskFile>("SELECT * FROM disk_files WHERE title_id = ?", titleId);
+  const covered = (f: { season: number | null; episode: number | null }) =>
+    title.type === "movie"
+      ? disk.length > 0
+      : f.episode != null && disk.some((d) => d.episode === f.episode && (d.season ?? 1) === (f.season ?? 1));
+  const gone = all<MissingFile & { id: number; local_path: string }>(
+    `SELECT f.id, f.remote_name AS name, f.size, f.local_path, f.season, f.episode
+       FROM files f JOIN links l ON l.id = f.link_id
+      WHERE l.title_id = ? AND f.status IN ('done', 'skipped') AND f.local_path IS NOT NULL AND f.removed_at IS NULL`,
+    titleId,
+  ).filter((f) => isVideo(f.local_path) && !fs.existsSync(f.local_path) && !covered(f));
+  if (gone.length === 0) return [];
+  requeueFiles(gone.map((f) => f.id));
+  logDebug("scan", () => `Re-queued ${gone.length} missing download(s): ${gone.map((f) => f.name).join(", ")}`, titleId);
+  return gone.map(({ name, season, episode, size }) => ({ name, season, episode, size }));
+}
+
+/**
+ * Brings the database in line with the title's folder: rescans it, then re-queues Riparr's
+ * downloads that are gone from it (logged as History activity). Every view reads what's on disk
+ * from the scan, so this is the one way the folder's state reaches Riparr. Returns null when the
+ * root folder is unreachable (nothing changed).
+ */
+export function syncFolder(titleId: number, now = Date.now()): { files: DiskFile[]; requeued: MissingFile[] } | null {
+  const files = scanTitle(titleId, now);
+  if (!files) return null;
+  const requeued = requeueMissingDownloads(titleId);
+  if (requeued.length) {
+    const what = requeued.length === 1 ? requeued[0].name : `${requeued.length} files`;
+    logEvent("info", `${what} ${requeued.length === 1 ? "is" : "are"} gone from the folder; downloading again`, titleId, "scan", {
+      kind: "files_missing",
+      data: { files: requeued, redownload: true },
+    });
+  }
+  return { files, requeued };
+}
+
+/**
+ * Adds a file Riparr just downloaded to the folder's scan results, so it counts as on disk
+ * straight away rather than at the next rescan. Non-video files and files outside the title's
+ * folder are ignored, as a scan would.
+ */
+export function recordDownload(titleId: number, filePath: string) {
+  const title = getTitle(titleId);
+  if (!title || !isVideo(filePath)) return;
+  const folder = path.join(title.root_path, title.folder);
+  if (!filePath.startsWith(folder + path.sep) || filePath.slice(folder.length + 1).split(path.sep).some((p) => p.startsWith("."))) return;
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(filePath);
+  } catch {
+    return;
+  }
+  const ep = diskEpisode(filePath, title.type);
+  run(
+    `INSERT INTO disk_files (title_id, path, size, season, episode, mtime) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (title_id, path) DO UPDATE SET size = excluded.size, season = excluded.season, episode = excluded.episode, mtime = excluded.mtime`,
+    titleId,
+    filePath,
+    st.size,
+    ep.season,
+    ep.episode,
+    Math.round(st.mtimeMs),
+  );
+}
+
+/**
+ * Files in the title's folder that Riparr didn't download itself: no finished
+ * download of the title points at them. Pending copies of their episodes
+ * aren't downloaded (see coveredByDisk).
  */
 export function externalDiskFiles(titleId?: number): DiskFile[] {
   const where = titleId === undefined ? "" : "AND d.title_id = ?";
@@ -108,6 +292,15 @@ export function externalDiskFiles(titleId?: number): DiskFile[] {
       ORDER BY d.title_id, d.season, d.episode, d.path`,
     ...(titleId === undefined ? [] : [titleId]),
   );
+}
+
+/** "3 video files: 2 downloaded by Riparr, 1 added by hand", for the log. */
+export function describeScan(titleId: number, files: DiskFile[]): string {
+  if (files.length === 0) return "no video files";
+  const external = externalDiskFiles(titleId).length;
+  const own = files.length - external;
+  const parts = [own ? `${own} downloaded by Riparr` : null, external ? `${external} added by hand` : null].filter(Boolean);
+  return `${files.length} video file${files.length === 1 ? "" : "s"} (${parts.join(", ")})`;
 }
 
 /** Titles whose folder hasn't been scanned for `maxAgeMs`, oldest first. */

@@ -41,6 +41,8 @@ export function progressLabel(type: TitleType, p: TitleProgress): string {
       return "Retrying";
     case "queued":
       return "Queued";
+    case "removed":
+      return "Deleted";
     default:
       return "Not downloaded";
   }
@@ -111,6 +113,8 @@ export function EpisodePill({
       return <StatusPill state="paused" label="Standby" />;
     case "failed":
       return <StatusPill state="error" label="Failed" />;
+    case "removed":
+      return <StatusPill state="paused" label="Deleted" />;
     default:
       return <StatusPill state="paused" label="Missing" />;
   }

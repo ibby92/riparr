@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { closeDb, getDb } from "./db";
+import { closeDb, getDb, run } from "./db";
 import { migrate, SCHEMA_VERSION } from "./db/migrations";
 import { sendCommand, takeCommands } from "./commands";
 import { logEvent, recentEvents } from "./events";
@@ -180,7 +180,10 @@ describe("database", () => {
     const linkId = Number(getDb().prepare("SELECT id FROM links WHERE url LIKE '%pixeldrain%'").get()!.id);
     const [file] = upsertFiles(linkId, [{ key: "a", name: "Doctor.X.S01E03.mkv", dir: "", size: 10, hash: null }]);
     expect(file).toMatchObject({ season: 1, episode: 3, status: "standby" });
-    updateFile(file.id, { status: "done" });
+    updateFile(file.id, { status: "done", local_path: "/m/Doctor.X.S01E03.mkv" });
+    // On disk only once the folder holds it.
+    expect(getTitle(titleId)).toMatchObject({ episodes_done: 0, episodes_seen: 1, link_count: 2 });
+    run("INSERT INTO disk_files (title_id, path, size, season, episode, mtime) VALUES (?, '/m/Doctor.X.S01E03.mkv', 10, 1, 3, 1)", titleId);
     expect(getTitle(titleId)).toMatchObject({ episodes_done: 1, episodes_seen: 1, link_count: 2 });
   });
 
