@@ -13,6 +13,7 @@ import {
 import { credentialsInput } from "@/lib/credentials";
 import { requireSession, startSession } from "@/lib/session";
 import { ACCOUNT_FIELDS, listHostAccounts, saveHostAccount } from "@/lib/host-accounts";
+import { gofileAutoRefresh, refreshGofileSalt, setGofileAutoRefresh } from "@/lib/hosts/gofile-salt";
 import { testFlareSolverr } from "@/lib/crawlers";
 import { describeNetworkError, maskProxyUrl, proxiedFetch, proxyUrlError, proxyUrlSetting, publicIp, unmaskProxyUrl } from "@/lib/net";
 import { notify } from "@/lib/notify";
@@ -193,7 +194,24 @@ export async function saveHostAccounts(_prev: SettingsState, formData: FormData)
       });
     }
   }
+  const auto = formData.get("gofile.autoSalt") === "on";
+  if (auto !== gofileAutoRefresh()) {
+    setGofileAutoRefresh(auto);
+    logEvent("info", `Hosts settings saved: gofile salt auto-refresh ${auto ? "on" : "off"}`, null, "web", {
+      kind: "settings_changed",
+      data: { section: "Hosts", changes: [`gofile salt auto-refresh ${auto ? "on" : "off"}`] },
+    });
+  }
   return saved();
+}
+
+/** Downloads gofile's token script, runs it in a sandbox and stores the salt it uses. */
+export async function refreshGofileSaltNow(): Promise<TestState> {
+  await requireSession();
+  const result = await refreshGofileSalt();
+  refresh();
+  if (!result.ok) return { ok: false, result: result.error };
+  return { ok: true, result: result.changed ? "Salt updated" : "Salt is already current" };
 }
 
 /* ------------------------------------------------------------ connections */

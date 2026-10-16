@@ -2,8 +2,9 @@
 
 import { Field, PageHeader } from "../../_kit";
 import { Section, SettingsCard } from "../_ui/section";
-import { SaveActions, useSettingsForm } from "../_ui/form";
-import { saveHostAccounts } from "../actions";
+import { RefreshCw } from "lucide-react";
+import { SaveActions, TestButton, useSettingsForm } from "../_ui/form";
+import { refreshGofileSaltNow, saveHostAccounts } from "../actions";
 
 export type HostAccountView = {
   host: string;
@@ -18,7 +19,7 @@ const INTROS: Record<string, string> = {
 
 const FORM_ID = "settings-hosts";
 
-export function HostsForm({ hosts }: { hosts: HostAccountView[] }) {
+export function HostsForm({ hosts, gofileAuto, saltRefreshedAt }: { hosts: HostAccountView[]; gofileAuto: boolean; saltRefreshedAt: number | null }) {
   const form = useSettingsForm(saveHostAccounts);
 
   return (
@@ -55,6 +56,21 @@ export function HostsForm({ hosts }: { hosts: HostAccountView[] }) {
                   </Field>
                 );
               })}
+              {h.host === "gofile" && (
+                <>
+                  <Field
+                    label="Refresh salt from gofile"
+                    htmlFor="gofile-refresh"
+                    hint={`Downloads gofile's token script and reads the current salt from it in a locked-down sandbox (no file, network or process access).${saltRefreshedAt ? ` Last refreshed ${new Date(saltRefreshedAt).toLocaleString("en-US", { timeZone: "UTC" })} UTC.` : ""} A salt typed above still wins.`}
+                  >
+                    <TestButton run={refreshGofileSaltNow} label="Refresh salt" icon={RefreshCw} />
+                  </Field>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" name="gofile.autoSalt" className="accent-accent" defaultChecked={form.checked("gofile.autoSalt", gofileAuto)} />
+                    Refresh the salt automatically when gofile starts rejecting it (at most every 6 hours)
+                  </label>
+                </>
+              )}
             </Section>
           ))}
           <Section title="MEGA" intro="Public links only; account sign-in isn't supported yet.">

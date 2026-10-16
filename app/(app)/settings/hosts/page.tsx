@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 import { connection } from "next/server";
 import { ACCOUNT_FIELDS, listHostAccounts } from "@/lib/host-accounts";
+import { gofileAutoRefresh, lastSaltRefresh } from "@/lib/hosts/gofile-salt";
 import { HostsForm, type HostAccountView } from "./hosts-form";
 
 export const metadata: Metadata = { title: "Hosts" };
@@ -30,5 +31,5 @@ async function Hosts() {
       value: f.secret ? "" : (saved[host]?.[f.key] ?? ""),
     })),
   }));
-  return <HostsForm hosts={hosts} />;
+  return <HostsForm hosts={hosts} gofileAuto={gofileAutoRefresh()} saltRefreshedAt={lastSaltRefresh()} />;
 }

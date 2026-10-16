@@ -135,6 +135,18 @@ describe("gofile", () => {
     expect(n).toBe(2);
   });
 
+  it("replaces a cached guest token that gofile reports as wrongToken", async () => {
+    let n = 0;
+    const a = api((c) => {
+      if (c.url.pathname === "/accounts") return account(`W${++n}`);
+      if (c.headers.get("authorization") === "Bearer W1") return Response.json({ status: "error-wrongToken", data: {} }, { status: 401 });
+      return ok(tree.s2);
+    });
+    const files = await gofile.resolve(new URL("https://gofile.io/d/s2"), opts(a.fetch));
+    expect(files).toHaveLength(1);
+    expect(n).toBe(2);
+  });
+
   it("gives NeedsAttention when the API keeps rejecting the website token", async () => {
     const a = api((c) =>
       c.url.pathname === "/accounts" ? account("T") : Response.json({ status: "error-notPremium", data: {} }),

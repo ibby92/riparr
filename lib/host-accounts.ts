@@ -1,4 +1,5 @@
 import { all, one, run } from "./db";
+import { getSetting } from "./settings";
 import type { HostAccount } from "./hosts/types";
 
 export type AccountField = { key: string; label: string; secret: boolean; hint?: string };
@@ -23,13 +24,21 @@ export const ACCOUNT_FIELDS: Record<string, { label: string; fields: AccountFiel
   },
 };
 
-/** Stored credentials for a host, or null if none are set or the account is disabled. */
+/** Setting holding gofile's website-token salt as last read from gofile (lib/hosts/gofile-salt.ts). */
+export const GOFILE_SALT_KEY = "gofile.wt_salt";
+
+/**
+ * Stored credentials for a host, or null if none are set or the account is disabled. For gofile,
+ * the refreshed salt fills in when the account has no `wtSalt` of its own.
+ */
 export function hostAccount(host: string): HostAccount | null {
   const row = one<{ credentials: string }>(
     "SELECT credentials FROM host_accounts WHERE host = ? AND enabled = 1",
     host,
   );
-  return row ? (JSON.parse(row.credentials) as HostAccount) : null;
+  const account = row ? (JSON.parse(row.credentials) as HostAccount) : null;
+  const learned = host === "gofile" ? getSetting(GOFILE_SALT_KEY) : undefined;
+  return learned && !account?.wtSalt ? { ...account, wtSalt: learned } : account;
 }
 
 export function listHostAccounts(): Record<string, HostAccount> {

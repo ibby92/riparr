@@ -16,6 +16,12 @@ import type { HostResolver, RemoteFile, ResolveOptions } from "./types";
 const API = "https://api.gofile.io";
 const LANG = "en-US";
 export const GOFILE_WT_SALT = "12af056dacea0b";
+export const GOFILE_WT_SCRIPT_URL = "https://gofile.io/js/wt.obf.js";
+
+/** gofile still rejects the website token on a fresh guest: the salt (or scheme) is probably outdated. */
+export class StaleSaltError extends NeedsAttentionError {
+  name = "StaleSaltError";
+}
 
 type Child = {
   id: string;
@@ -108,9 +114,10 @@ function toTypedError(e: unknown): unknown {
     case "error-notPublic":
       return new NeedsAttentionError("gofile: folder is private");
     case "error-notPremium":
-      return new NeedsAttentionError("gofile: API rejected the request (website-token salt may be outdated; set wtSalt or a premium token)");
+      return new StaleSaltError("gofile: API rejected the request (website-token salt may be outdated; refresh it in Settings → Hosts)");
     case "error-auth":
     case "error-token":
+    case "error-wrongToken":
       return new NeedsAttentionError("gofile: account token rejected");
   }
   return new Error(e.message);
@@ -118,7 +125,7 @@ function toTypedError(e: unknown): unknown {
 
 /** Statuses after which a fresh guest token is worth one retry. */
 const isAuthStatus = (e: unknown) =>
-  e instanceof GofileStatus && ["error-auth", "error-token", "error-notPremium"].includes(e.status);
+  e instanceof GofileStatus && ["error-auth", "error-token", "error-wrongToken", "error-notPremium"].includes(e.status);
 
 export const gofile: HostResolver = {
   id: "gofile",
