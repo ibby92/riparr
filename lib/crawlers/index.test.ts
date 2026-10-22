@@ -105,6 +105,26 @@ describe("crawlContainer", () => {
     await expect(crawl(() => html(page), "nope").promise).rejects.toThrow(/rejected the password/);
   });
 
+  // Shaped like viewcrate: the page's script copies the csrf_token cookie into the empty field,
+  // and the unlock answers 303 with the unlock cookie set on the redirect itself.
+  it("fills an empty CSRF field from its cookie and keeps cookies set on a redirect", async () => {
+    const { promise, calls } = crawl((url, init) => {
+      const cookie = (init.headers as Record<string, string>).Cookie ?? "";
+      if (init.method === "POST") {
+        if (init.body !== "csrf_token=tok%3D1&password=284") return html("Forbidden", 403);
+        return new Response(null, { status: 303, headers: { location: "/abc", "set-cookie": "unlocked_1=u1; Path=/" } });
+      }
+      if (cookie.includes("unlocked_1=u1")) return html(`<a href="https://gofile.io/d/z">files</a>`);
+      return html(`<form method="post" action="/unlock/abc"><input type="hidden" name="csrf_token" value="">
+        <input name="password" type="password"><button>Unlock</button></form>`, 200, {
+        "set-cookie": "csrf_token=tok=1; Path=/",
+      });
+    }, "284");
+    expect(await promise).toEqual({ links: ["https://gofile.io/d/z"], source: "plain" });
+    expect(calls[2].init.method).toBeUndefined();
+    expect(calls[2].init.body).toBeUndefined();
+  });
+
   it("reports DLC-only pages", async () => {
     const p = crawl(() => html(`<a href="/DLC/abc.dlc">DLC</a>`)).promise;
     await expect(p).rejects.toThrow(/DLC/);

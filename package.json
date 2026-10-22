@@ -1,6 +1,6 @@
 {
   "name": "riparr",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "scripts": {
     "dev": "concurrently -k -n web,worker -c blue,magenta \"next dev\" \"tsx watch worker/index.ts\"",

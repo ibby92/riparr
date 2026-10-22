@@ -127,21 +127,52 @@ function mergeCookies(...lists: string[][]): string[] {
   return [...byName.values()];
 }
 
+const MAX_REDIRECTS = 10;
+
+function setCookiePairs(res: Response): string[] {
+  return (res.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0].trim()).filter(Boolean);
+}
+
 async function fetchPage(url: string, opts: CrawlOptions, init: RequestInit = {}, identity = DEFAULT_IDENTITY): Promise<Page> {
   const doFetch = siteFetch(opts);
-  const res = await doFetch(url, {
-    redirect: "follow",
-    ...init,
-    headers: {
-      ...HEADERS,
-      "User-Agent": identity.userAgent,
-      ...(identity.cookies.length ? { Cookie: identity.cookies.join("; ") } : {}),
-      ...(init.headers as Record<string, string>),
-    },
-    signal: AbortSignal.any([opts.signal, AbortSignal.timeout(TIMEOUT_MS)]),
-  });
+  const signal = AbortSignal.any([opts.signal, AbortSignal.timeout(TIMEOUT_MS)]);
+  // Redirects are followed here rather than by fetch, which drops cookies set on the redirect
+  // itself (viewcrate's password form answers 303 with the unlock cookie).
+  let cookies = identity.cookies;
+  let current = url;
+  let request = init;
+  let res: Response;
+  for (let hop = 0; ; hop++) {
+    res = await doFetch(current, {
+      ...request,
+      redirect: "manual",
+      headers: {
+        ...HEADERS,
+        "User-Agent": identity.userAgent,
+        ...(cookies.length ? { Cookie: cookies.join("; ") } : {}),
+        ...(request.headers as Record<string, string>),
+      },
+      signal,
+    });
+    const location = res.headers.get("location");
+    if (res.status < 300 || res.status >= 400 || !location) break;
+    if (hop >= MAX_REDIRECTS) throw new Error(`Too many redirects fetching ${url}`);
+    await res.body?.cancel();
+    cookies = mergeCookies(cookies, setCookiePairs(res));
+    const next = new URL(location, current);
+    if (new URL(current).origin !== next.origin) cookies = [];
+    current = next.href;
+    // 307/308 repeat the request as is; the others turn it into a plain GET.
+    if (res.status !== 307 && res.status !== 308) {
+      const headers = { ...(request.headers as Record<string, string>) };
+      delete headers["Content-Type"];
+      request = { ...request, method: undefined, body: undefined, headers };
+    }
+  }
   const html = await res.text();
-  opts.log?.(`GET ${url} → HTTP ${res.status}, ${Math.round(html.length / 1024)} KB${identity !== DEFAULT_IDENTITY ? " (with FlareSolverr clearance)" : ""}`);
+  const via = current !== url ? ` → ${current}` : "";
+  const clearance = identity.cookies.some((c) => c.startsWith("cf_clearance=")) ? " (with FlareSolverr clearance)" : "";
+  opts.log?.(`${init.method ?? "GET"} ${url}${via} → HTTP ${res.status}, ${Math.round(html.length / 1024)} KB${clearance}`);
   if (!res.ok) {
     if ((res.status === 403 || res.status === 503 || res.status === 429) && CHALLENGE.test(html)) {
       throw new ChallengeError(CHALLENGE_MSG);
@@ -156,11 +187,10 @@ async function fetchPage(url: string, opts: CrawlOptions, init: RequestInit = {}
     }
     throw new Error(`HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""} fetching ${url}`);
   }
-  const setCookies = (res.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0].trim()).filter(Boolean);
   return {
     html,
-    url: res.url || url,
-    cookies: mergeCookies(identity.cookies, setCookies),
+    url: current,
+    cookies: mergeCookies(cookies, setCookiePairs(res)),
     userAgent: identity.userAgent,
     via: "direct",
   };
@@ -208,6 +238,13 @@ function isChallengePage(html: string, url: string) {
   return CHALLENGE.test(html) && !extractHostLinks(html, url).length && !findCnl2Payloads(html).length;
 }
 
+/** Value of the cookie named like a CSRF form field (`csrf_token`, `_xsrf`, …), if the page set one. */
+function csrfCookie(cookies: string[], field: string): string | null {
+  if (!/csrf|xsrf/i.test(field)) return null;
+  const pair = cookies.find((c) => c.slice(0, c.indexOf("=")) === field);
+  return pair ? decodeURIComponent(pair.slice(field.length + 1)) : null;
+}
+
 /**
  * Submits the page's password form with `password`. Returns null if the page has no such form.
  *
@@ -228,6 +265,9 @@ async function submitPassword(page: Page, password: string, opts: CrawlOptions, 
     if (type === "password") body.set(a.name, password);
     else if (type === "checkbox" || type === "radio") {
       if ("checked" in a) body.append(a.name, a.value ?? "on");
+    } else if (type === "hidden" && !a.value && csrfCookie(page.cookies, a.name)) {
+      // Double-submit CSRF (viewcrate): the page's script copies the cookie into the empty field.
+      body.append(a.name, csrfCookie(page.cookies, a.name)!);
     } else if (type !== "submit" && type !== "button" && type !== "image") body.append(a.name, a.value ?? "");
   }
   const action = new URL(formAttrs.action || page.url, page.url).href;
