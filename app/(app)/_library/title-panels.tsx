@@ -6,7 +6,18 @@ import type { DiskFile } from "@/lib/disk-scan";
 import type { ExtractionRow } from "@/lib/links";
 import type { SourceWithTitle } from "@/lib/sources";
 import type { TitleWithStats } from "@/lib/titles";
-import { Card, EmptyState, HostChip, ProgressBar, StatusPill, episodeLabel, formatAgo, formatBytes, type PillState } from "../_kit";
+import {
+  Card,
+  EmptyState,
+  HostChip,
+  ProgressBar,
+  StatusPill,
+  SubmitButton,
+  episodeLabel,
+  formatAgo,
+  formatBytes,
+  type PillState,
+} from "../_kit";
 import { siteOf, type EpisodeRow, type FileView } from "../_data/progress";
 import { redownloadEpisode, rescanTitle, retryExtractions } from "../titles/actions";
 import { DeleteFileButton } from "./delete-file-button";
@@ -49,10 +60,10 @@ function RedownloadForm({ titleId, season, episode }: { titleId: number; season:
       <input type="hidden" name="id" value={titleId} />
       <input type="hidden" name="season" value={season ?? ""} />
       <input type="hidden" name="episode" value={episode ?? ""} />
-      <button className="btn h-8 min-h-0 px-2.5 text-xs">
+      <SubmitButton className="btn h-8 min-h-0 px-2.5 text-xs">
         <RotateCw size={13} strokeWidth={1.75} aria-hidden="true" />
         Download again
-      </button>
+      </SubmitButton>
     </form>
   );
 }
@@ -352,10 +363,10 @@ export function FilesPanel({
         action={
           <form action={rescanTitle}>
             <input type="hidden" name="id" value={title.id} />
-            <button className="btn h-9 min-h-0 px-3 text-[13px]">
+            <SubmitButton className="btn h-9 min-h-0 px-3 text-[13px]">
               <RefreshCw size={15} strokeWidth={1.75} aria-hidden="true" />
               Rescan folder
-            </button>
+            </SubmitButton>
           </form>
         }
         bodyClassName=""
@@ -418,10 +429,10 @@ export function FilesPanel({
             failed && (
               <form action={retryExtractions}>
                 <input type="hidden" name="id" value={title.id} />
-                <button className="btn h-9 min-h-0 px-3 text-[13px]">
+                <SubmitButton className="btn h-9 min-h-0 px-3 text-[13px]">
                   <RefreshCw size={15} strokeWidth={1.75} aria-hidden="true" />
                   Retry failed
-                </button>
+                </SubmitButton>
               </form>
             )
           }

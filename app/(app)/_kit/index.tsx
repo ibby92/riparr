@@ -3,6 +3,7 @@ import { CircleAlert, CircleCheck, Hourglass, Loader, Pause, TriangleAlert, type
 
 export { Countdown } from "./countdown";
 export { Poster } from "./poster";
+export { SubmitButton } from "./submit-button";
 export * from "./format";
 
 /* ------------------------------------------------------------------ layout */

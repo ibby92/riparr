@@ -4,7 +4,7 @@ import { connection } from "next/server";
 import { LogOut, ShieldCheck, ShieldOff } from "lucide-react";
 import { apiKey, authMode, currentUsername } from "@/lib/auth";
 import { logout } from "@/app/auth-actions";
-import { PageHeader } from "../../_kit";
+import { PageHeader, SubmitButton } from "../../_kit";
 import { Section, SettingsCard } from "../_ui/section";
 import { setAuthentication } from "../actions";
 import { ApiKeyField, PasswordForm } from "./security-forms";
@@ -46,9 +46,9 @@ async function Security() {
         {!envOverride && (
           <form action={setAuthentication} className="flex flex-col items-start gap-1.5">
             <input type="hidden" name="mode" value={mode === "forms" ? "none" : "forms"} />
-            <button className={mode === "forms" ? "btn btn-danger" : "btn btn-primary"} disabled={mode === "none" && !username}>
+            <SubmitButton className={mode === "forms" ? "btn btn-danger" : "btn btn-primary"} disabled={mode === "none" && !username}>
               {mode === "forms" ? "Turn off sign-in" : "Require sign-in"}
-            </button>
+            </SubmitButton>
             {mode === "forms" && (
               <p className="text-xs text-muted">Only turn this off if Riparr is behind another login, such as a reverse proxy with auth.</p>
             )}
@@ -79,10 +79,10 @@ async function Security() {
       {mode === "forms" && (
         <Section title="Session" intro={username ? `Signed in as ${username}.` : undefined}>
           <form action={logout}>
-            <button className="btn">
+            <SubmitButton className="btn">
               <LogOut size={15} aria-hidden="true" />
               Sign out
-            </button>
+            </SubmitButton>
           </form>
         </Section>
       )}

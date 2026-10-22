@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { logout } from "@/app/auth-actions";
 import { ITEM_ICONS, NAV, isActive, isGroup, type BadgeKey, type NavGroup } from "./nav";
+import { SubmitButton } from "../_kit";
 
 /** The subset of /api/v1/status the shell uses. */
 type Status = {
@@ -416,9 +417,9 @@ function TopBar({ status, onMenu }: { status: Status | null; onMenu: () => void 
           )}
         </div>
         <form action={logout} className="hidden md:block">
-          <button className="btn btn-ghost size-9 p-0" aria-label="Sign out" title="Sign out">
+          <SubmitButton className="btn btn-ghost size-9 p-0" aria-label="Sign out" title="Sign out">
             <LogOut size={17} strokeWidth={1.75} />
-          </button>
+          </SubmitButton>
         </form>
       </div>
     </header>

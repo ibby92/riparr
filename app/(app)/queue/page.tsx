@@ -16,6 +16,7 @@ import {
   Poster,
   ProgressBar,
   StatusPill,
+  SubmitButton,
   episodeLabel,
   formatAgo,
   formatBytes,
@@ -104,10 +105,10 @@ function RetryButton({ id, label = "Retry now" }: { id: number; label?: string }
   return (
     <form action={retryLinkNow}>
       <input type="hidden" name="id" value={id} />
-      <button className="btn">
+      <SubmitButton className="btn">
         <RotateCw size={15} strokeWidth={1.75} />
         <span className="hidden md:inline">{label}</span>
-      </button>
+      </SubmitButton>
     </form>
   );
 }
@@ -170,7 +171,7 @@ async function Queue() {
             {h.state === "limited" && (
               <form action={retryHostNow}>
                 <input type="hidden" name="host" value={h.host} />
-                <button className="btn w-full">Try {h.host_label} now</button>
+                <SubmitButton className="btn w-full">Try {h.host_label} now</SubmitButton>
               </form>
             )}
           </div>
@@ -228,7 +229,7 @@ async function Queue() {
           action={
             <form action={retryHostNow}>
               <input type="hidden" name="host" value={group.host} />
-              <button className="btn">Try now</button>
+              <SubmitButton className="btn">Try now</SubmitButton>
             </form>
           }
         >

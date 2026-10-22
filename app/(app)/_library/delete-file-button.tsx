@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { deleteFile } from "../titles/actions";
+import { SubmitButton } from "../_kit";
 
 /** Delete a file from the folder, with an inline confirm that can also queue the episode again. */
 export function DeleteFileButton({ titleId, path, name }: { titleId: number; path: string; name: string }) {
@@ -26,7 +27,7 @@ export function DeleteFileButton({ titleId, path, name }: { titleId: number; pat
       <button type="button" className="btn" onClick={() => setConfirming(false)}>
         Cancel
       </button>
-      <button className="btn btn-primary">Delete</button>
+      <SubmitButton className="btn btn-primary">Delete</SubmitButton>
     </form>
   );
 }

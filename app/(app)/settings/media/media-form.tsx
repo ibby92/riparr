@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { FolderSearch, Plus, Trash2 } from "lucide-react";
-import { Field, PageHeader, ProgressBar, StatusPill, SwitchRow, formatBytes } from "../../_kit";
+import { Field, PageHeader, ProgressBar, StatusPill, SubmitButton, SwitchRow, formatBytes } from "../../_kit";
 import { Section, SettingsCard } from "../_ui/section";
 import { SaveActions, useSettingsForm } from "../_ui/form";
 import { addRootFolderAction, removeRootFolderAction, saveMediaSettings, type RootFolderState } from "../actions";
@@ -155,14 +155,14 @@ function RootFolderRow({ root: r, isShowDefault, isMovieDefault }: { root: RootR
       </div>
       <form action={removeRootFolderAction} className="col-start-2 row-start-1 md:col-start-3">
         <input type="hidden" name="id" value={r.id} />
-        <button
+        <SubmitButton
           className="btn btn-ghost btn-danger px-2"
           disabled={r.titleCount > 0}
           aria-label={`Remove ${r.path}`}
           title={r.titleCount > 0 ? "Titles still use this folder" : `Remove ${r.path}`}
         >
           <Trash2 size={16} aria-hidden="true" />
-        </button>
+        </SubmitButton>
       </form>
     </li>
   );

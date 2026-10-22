@@ -1,5 +1,5 @@
 import type { LinkStatus, LinkWithProgress } from "@/lib/links";
-import { HostChip, ProgressBar, StatusPill, formatAgo, formatBytes, formatDuration, type PillState } from "../_kit";
+import { HostChip, ProgressBar, StatusPill, SubmitButton, formatAgo, formatBytes, formatDuration, type PillState } from "../_kit";
 import { ignoreLink, retryLink } from "../titles/actions";
 
 /** Queued with nothing left to fetch itself: every remaining file waits on a preferred host. */
@@ -84,13 +84,13 @@ export function LinksList({ links, now }: { links: LinkWithProgress[]; now: numb
               {RETRYABLE.includes(l.status) && !standby && (
                 <form action={retryLink}>
                   <input type="hidden" name="id" value={l.id} />
-                  <button className="btn h-9 min-h-0 px-3 text-[13px]">{l.status === "queued" ? "Retry now" : "Retry"}</button>
+                  <SubmitButton className="btn h-9 min-h-0 px-3 text-[13px]">{l.status === "queued" ? "Retry now" : "Retry"}</SubmitButton>
                 </form>
               )}
               {IGNORABLE.includes(l.status) && (
                 <form action={ignoreLink}>
                   <input type="hidden" name="id" value={l.id} />
-                  <button className="btn btn-ghost h-9 min-h-0 px-3 text-[13px]">Ignore</button>
+                  <SubmitButton className="btn btn-ghost h-9 min-h-0 px-3 text-[13px]">Ignore</SubmitButton>
                 </form>
               )}
             </div>

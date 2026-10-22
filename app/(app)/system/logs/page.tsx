@@ -5,7 +5,7 @@ import { connection } from "next/server";
 import { Bug, ScrollText } from "lucide-react";
 import { debugForcedByEnv, debugLogging, LOG_COMPONENTS, type EventLevel, type LogComponent } from "@/lib/events";
 import { formatter, localDay } from "@/lib/time";
-import { EmptyState, PageHeader } from "../../_kit";
+import { EmptyState, PageHeader, SubmitButton } from "../../_kit";
 import { logEntries, logStats, logTitles, type LogEntry, type LogFilter } from "../../_data/logs";
 import { HistoryFilters } from "../../history/filters";
 import { setLogLevel } from "../actions";
@@ -40,14 +40,14 @@ async function DebugSwitch() {
   return (
     <form action={setLogLevel} className="flex items-center gap-2">
       <input type="hidden" name="level" value={on ? "info" : "debug"} />
-      <button
+      <SubmitButton
         className={`btn ${on ? "" : "btn-primary"}`}
         disabled={forced}
         title={forced ? "RIPARR_LOG_LEVEL=debug is set, so debug logging stays on" : undefined}
       >
         <Bug size={16} strokeWidth={1.75} aria-hidden="true" />
         {on ? "Turn off debug logging" : "Turn on debug logging"}
-      </button>
+      </SubmitButton>
     </form>
   );
 }

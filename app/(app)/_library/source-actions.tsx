@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { siteHint } from "@/lib/site-hints";
 import { checkSourceNow, editSource, removeSource, toggleSource, type SourceFormState } from "../titles/actions";
+import { SubmitButton } from "../_kit";
 
 export type SourceEditable = {
   id: number;
@@ -47,10 +48,10 @@ export function SourceActions({
       <div className="flex flex-wrap items-center gap-2">
         <form action={checkSourceNow}>
           <input type="hidden" name="id" value={s.id} />
-          <button className={small} disabled={!canCheck}>
+          <SubmitButton className={small} disabled={!canCheck}>
             <RefreshCw size={15} strokeWidth={1.75} aria-hidden="true" />
             Check
-          </button>
+          </SubmitButton>
         </form>
         <button type="button" className={`${small} ${needsAttention && !open ? "btn-primary" : ""}`} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
           <Pencil size={15} strokeWidth={1.75} aria-hidden="true" />
@@ -59,14 +60,14 @@ export function SourceActions({
         <form action={toggleSource}>
           <input type="hidden" name="id" value={s.id} />
           <input type="hidden" name="enabled" value={s.enabled ? "0" : "1"} />
-          <button className={small}>{s.enabled ? "Disable" : "Enable"}</button>
+          <SubmitButton className={small}>{s.enabled ? "Disable" : "Enable"}</SubmitButton>
         </form>
         <form action={removeSource}>
           <input type="hidden" name="id" value={s.id} />
-          <button className={`${small} btn-danger`} aria-label={`Remove source ${label}`}>
+          <SubmitButton className={`${small} btn-danger`} aria-label={`Remove source ${label}`}>
             <Trash2 size={15} strokeWidth={1.75} aria-hidden="true" />
             Remove
-          </button>
+          </SubmitButton>
         </form>
         {state.message && !open && (
           <span className="text-[13px] text-good" aria-live="polite">

@@ -145,14 +145,42 @@ h3 {
     font-size: 14px;
     font-weight: 500;
     white-space: nowrap;
-    transition: background var(--dur-fast, 120ms) var(--ease, ease);
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      background var(--dur-fast, 120ms) var(--ease, ease),
+      box-shadow var(--dur-fast, 120ms) var(--ease, ease),
+      transform var(--dur-fast, 120ms) var(--ease, ease),
+      filter var(--dur-fast, 120ms) var(--ease, ease);
   }
   .btn:hover:not(:disabled) {
     background: var(--surface-2);
   }
+  /* Pressed: the button sinks a little and darkens, so every click visibly lands. */
+  .btn:active:not(:disabled) {
+    transform: translateY(1px) scale(0.96);
+    background: var(--surface-3);
+    border-color: var(--muted);
+    box-shadow: inset 0 2px 3px rgb(0 0 0 / 0.2);
+    transition-duration: 40ms;
+  }
+  .btn-primary:active:not(:disabled) {
+    background: var(--primary);
+    border-color: var(--primary);
+    filter: brightness(0.8);
+  }
   .btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+  /* Busy (SubmitButton while its action runs): dimmed less than disabled, spinner instead of the icon. */
+  .btn[aria-busy="true"] {
+    opacity: 0.75;
+    cursor: progress;
+  }
+  .btn[aria-busy="true"] > svg:not(.btn-spinner) {
+    display: none;
   }
   .btn-primary {
     background: var(--primary);

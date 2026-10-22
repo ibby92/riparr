@@ -4,6 +4,7 @@ import { useActionState, useState, type ReactNode } from "react";
 import { Archive, Loader, Trash2 } from "lucide-react";
 import { SavedToast } from "../../settings/_ui/form";
 import { backupNow, deleteBackup, type BackupState } from "../actions";
+import { SubmitButton } from "../../_kit";
 
 export function BackupNowButton() {
   const [state, action, pending] = useActionState<BackupState>(backupNow, {});
@@ -39,7 +40,7 @@ export function DeleteBackupButton({ name, children }: { name: string; children:
             <button type="button" className="btn" onClick={() => setConfirming(false)}>
               Cancel
             </button>
-            <button className="btn btn-primary">Delete</button>
+            <SubmitButton className="btn btn-primary">Delete</SubmitButton>
           </form>
         ) : (
           <button type="button" className="btn btn-ghost btn-danger px-2" aria-label={`Delete ${name}`} onClick={() => setConfirming(true)}>

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { startTransition, useActionState, useEffect, useRef, useState, type FormEvent } from "react";
 import { Check, Search, Trash2, TriangleAlert, Unlink } from "lucide-react";
 import type { Title } from "@/lib/titles";
-import { Card, Poster, Tag } from "../_kit";
+import { Card, Poster, SubmitButton, Tag } from "../_kit";
 import { editTitle, removeTitle } from "./actions";
 import { Errors, Segmented, TmdbPoster } from "./_add/bits";
 import type { MediaKind } from "./_add/path-preview";
@@ -219,10 +219,10 @@ export function DeleteTitle({ id, name }: { id: number; name: string }) {
             <button type="button" className="btn" onClick={() => setConfirming(false)}>
               Cancel
             </button>
-            <button ref={confirmRef} type="submit" className="btn btn-danger border-critical">
+            <SubmitButton ref={confirmRef} type="submit" className="btn btn-danger border-critical">
               <Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />
               Delete
-            </button>
+            </SubmitButton>
           </div>
         ) : (
           <button type="button" className="btn btn-danger self-start md:self-auto" onClick={() => setConfirming(true)}>

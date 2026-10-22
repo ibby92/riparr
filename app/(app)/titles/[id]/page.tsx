@@ -8,7 +8,7 @@ import { formatter } from "@/lib/time";
 import { listRootFolders } from "@/lib/root-folders";
 import { listSources } from "@/lib/sources";
 import { getTitle } from "@/lib/titles";
-import { Card, EmptyState, Poster, StatusPill, Tag, formatBytes } from "../../_kit";
+import { Card, EmptyState, Poster, StatusPill, SubmitButton, Tag, formatBytes } from "../../_kit";
 import { diskFiles, episodeExtras, episodeRows, hostLimits, summarize, titleFileViews } from "../../_data/progress";
 import { AddSourceForm } from "../../_library/add-source-form";
 import { LinksList } from "../../_library/links-list";
@@ -160,10 +160,10 @@ async function TitleDetail({
                 <div className="flex flex-wrap gap-2">
                   <form action={unarchiveTitle}>
                     <input type="hidden" name="id" value={title.id} />
-                    <button className="btn btn-primary">
+                    <SubmitButton className="btn btn-primary">
                       <ArchiveRestore size={16} strokeWidth={1.75} aria-hidden="true" />
                       Unarchive
-                    </button>
+                    </SubmitButton>
                   </form>
                   <Link href={`${base}/edit`} className="btn">
                     <Pencil size={16} strokeWidth={1.75} aria-hidden="true" />
@@ -175,22 +175,22 @@ async function TitleDetail({
               <div className="flex flex-wrap gap-2">
                 <form action={checkTitleNow}>
                   <input type="hidden" name="id" value={title.id} />
-                  <button
+                  <SubmitButton
                     className="btn btn-primary"
                     disabled={!title.monitored || sources.length === 0}
                     title={!title.monitored ? "Resume the title to check it" : sources.length === 0 ? "Add a source first" : undefined}
                   >
                     <RefreshCw size={16} strokeWidth={1.75} aria-hidden="true" />
                     Check now
-                  </button>
+                  </SubmitButton>
                 </form>
                 <form action={toggleTitle}>
                   <input type="hidden" name="id" value={title.id} />
                   <input type="hidden" name="monitored" value={title.monitored ? "0" : "1"} />
-                  <button className="btn">
+                  <SubmitButton className="btn">
                     {title.monitored ? <Pause size={16} strokeWidth={1.75} aria-hidden="true" /> : <Play size={16} strokeWidth={1.75} aria-hidden="true" />}
                     {title.monitored ? "Pause" : "Resume"}
-                  </button>
+                  </SubmitButton>
                 </form>
                 <Link href={`${base}/edit`} className="btn">
                   <Pencil size={16} strokeWidth={1.75} aria-hidden="true" />
@@ -198,13 +198,13 @@ async function TitleDetail({
                 </Link>
                 <form action={archiveTitle}>
                   <input type="hidden" name="id" value={title.id} />
-                  <button
+                  <SubmitButton
                     className="btn btn-ghost"
                     title="Done with it? Archive keeps its settings, files and history, but stops checks and downloads. You can bring it back any time."
                   >
                     <Archive size={16} strokeWidth={1.75} aria-hidden="true" />
                     Archive
-                  </button>
+                  </SubmitButton>
                 </form>
               </div>
             )}
